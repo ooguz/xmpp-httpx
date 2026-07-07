@@ -15,7 +15,7 @@ const PLATFORM_SPECIFIC_GLOBALS = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist/", "node_modules/", "coverage/"] },
+  { ignores: ["dist/", "node_modules/", "coverage/", "examples/*/dist/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
@@ -32,6 +32,20 @@ export default tseslint.config(
     ignores: ["src/node/**"],
     rules: {
       "no-restricted-globals": ["error", ...PLATFORM_SPECIFIC_GLOBALS],
+    },
+  },
+  {
+    // Standalone runtime scripts (demo gateway, manifest packaging).
+    files: ["scripts/**/*.mjs", "examples/*/scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        atob: "readonly",
+        btoa: "readonly",
+        setTimeout: "readonly",
+        URL: "readonly",
+      },
     },
   },
 );

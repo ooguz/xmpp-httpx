@@ -1,0 +1,90 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+#chrome {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+#chrome button {
+  font-size: 1rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  background: transparent;
+  cursor: pointer;
+}
+#nav {
+  flex: 1;
+  display: flex;
+}
+#address {
+  flex: 1;
+  font: inherit;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+#status {
+  font-size: 0.8rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+}
+#status[data-state="disconnected"] {
+  background: #b3261e22;
+  color: #b3261e;
+}
+#status[data-state="connecting"] {
+  background: #7a590022;
+  color: #7a5900;
+}
+#status[data-state="online"] {
+  background: #1b6e2022;
+  color: #1b6e20;
+}
+main {
+  flex: 1;
+  display: flex;
+}
+#viewport {
+  flex: 1;
+  border: 0;
+  background: Canvas;
+}
+dialog {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 10px;
+  min-width: 22rem;
+}
+dialog label {
+  display: block;
+  margin: 0.6rem 0;
+}
+dialog input {
+  width: 100%;
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  margin-top: 0.2rem;
+}
+dialog .warning {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+dialog menu {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0;
+}
