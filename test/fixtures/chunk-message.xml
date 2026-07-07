@@ -1,0 +1,4 @@
+<message from='httpserver@example.org'
+         to='httpclient@example.org/browser'>
+   <chunk xmlns='urn:xmpp:http' streamId='Stream0001' nr='0'>aVZCT1J3MEtHZ29BQUFBTlNVaEVVZ0FBQVN3QUFBR1FDQVlBQQ==</chunk>
+</message>

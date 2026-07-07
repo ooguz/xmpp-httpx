@@ -1,0 +1,10 @@
+<iq type='set'
+    from='httpclient@example.org/browser'
+    to='httpserver@example.org'
+    id='2'>
+   <req xmlns='urn:xmpp:http' method='GET' resource='/rdf/xep' version='1.1'>
+       <headers xmlns='http://jabber.org/protocol/shim'>
+           <header name='Host'>example.org</header>
+       </headers>
+   </req>
+</iq>

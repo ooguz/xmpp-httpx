@@ -1,0 +1,15 @@
+<iq type='result'
+    from='httpserver@example.org'
+    to='httpclient@example.org/browser'
+    id='12'>
+   <resp xmlns='urn:xmpp:http' version='1.1' statusCode='200' statusMessage='OK'>
+       <headers xmlns='http://jabber.org/protocol/shim'>
+           <header name='Date'>Fri, 04 May 2013 15:05:32GMT-4</header>
+           <header name='Server'>Clayster</header>
+           <header name='Content-Type'>multipart/x-mixed-replace;boundary=__2347927492837489237492837</header>
+       </headers>
+       <data>
+           <ibb sid='Stream0002'/>
+       </data>
+   </resp>
+</iq>

@@ -1,0 +1,32 @@
+<iq type='result'
+    from='httpserver@example.org'
+    to='httpclient@example.org/browser'
+    id='4'>
+   <resp xmlns='urn:xmpp:http' version='1.1' statusCode='200' statusMessage='OK'>
+       <headers xmlns='http://jabber.org/protocol/shim'>
+           <header name='Date'>Fri, 03 May 2013 17:09:34-4</header>
+           <header name='Server'>Clayster</header>
+           <header name='Content-Type'>application/sparql-results+xml</header>
+       </headers>
+       <data>
+           <xml>
+               <sparql xmlns="http://www.w3.org/2005/sparql-results#">
+                   <head>
+                       <variable name="title"/>
+                       <variable name="creator"/>
+                   </head>
+                   <results>
+                       <result>
+                           <binding name="title">
+                               <literal>HTTP over XMPP</literal>
+                           </binding>
+                           <binding name="creator">
+                               <uri>http://example.org/PeterWaher</uri>
+                           </binding>
+                       </result>
+                   </results>
+               </sparql>
+           </xml>
+       </data>
+   </resp>
+</iq>
