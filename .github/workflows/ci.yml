@@ -67,7 +67,9 @@ jobs:
   api-docs:
     name: API docs (GitHub Pages)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Pages cannot deploy while the repo is private (free plan); the job
+    # activates automatically once the repo goes public and Pages is enabled.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !github.event.repository.private
     permissions:
       pages: write
       id-token: write
