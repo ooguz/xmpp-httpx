@@ -6,12 +6,19 @@ import {
   encodeBase64,
 } from "../../src/util/base64.js";
 
+/** Platform reference encoder (btoa is global in Node ≥ 16 and browsers). */
+function referenceBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
 describe("base64", () => {
-  it("round-trips arbitrary bytes and matches Buffer's encoding", () => {
+  it("round-trips arbitrary bytes and matches the platform's encoding", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 4096 }), (bytes) => {
         const encoded = encodeBase64(bytes);
-        expect(encoded).toBe(Buffer.from(bytes).toString("base64"));
+        expect(encoded).toBe(referenceBase64(bytes));
         expect(decodeBase64(encoded)).toEqual(bytes);
       }),
     );

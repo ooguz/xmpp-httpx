@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import xml from "@xmpp/xml";
 import parse from "@xmpp/xml/lib/parse.js";
 import { describe, expect, it } from "vitest";
@@ -13,13 +11,23 @@ import {
 } from "../../src/codec/index.js";
 import { NS_HTTPX } from "../../src/constants.js";
 import { CodecError } from "../../src/errors.js";
+// `?raw` imports keep this suite runnable in both the node and browser projects.
+import reqGetXml from "../fixtures/req-get.xml?raw";
+import respTextXml from "../fixtures/resp-text.xml?raw";
+import respXmlXml from "../fixtures/resp-xml.xml?raw";
+import respChunkedXml from "../fixtures/resp-chunked.xml?raw";
+import respIbbXml from "../fixtures/resp-ibb.xml?raw";
+
+const FIXTURES: Record<string, string> = {
+  "req-get.xml": reqGetXml,
+  "resp-text.xml": respTextXml,
+  "resp-xml.xml": respXmlXml,
+  "resp-chunked.xml": respChunkedXml,
+  "resp-ibb.xml": respIbbXml,
+};
 
 function fixture(name: string) {
-  const text = readFileSync(
-    join(import.meta.dirname, "..", "fixtures", name),
-    "utf8",
-  );
-  return parse(text);
+  return parse(FIXTURES[name]!);
 }
 
 describe("codec against XEP-0332 example fixtures", () => {
