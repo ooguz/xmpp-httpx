@@ -64,6 +64,27 @@ export function parseHttpxUrl(input: string | URL): HttpxUrl {
   };
 }
 
+/**
+ * Resolves a reference the way a browser resolves links: absolute httpx
+ * URLs pass through; everything else (absolute path, relative path, query,
+ * fragment) resolves against the base. Fragments are stripped (XEP-0332
+ * resources carry no fragments). Non-httpx absolute URLs (https:, mailto:…)
+ * are returned unchanged for the caller to handle.
+ */
+export function resolveHttpxUrl(base: string | HttpxUrl, ref: string): string {
+  const trimmed = ref.trim();
+  if (/^httpx:\/\//i.test(trimmed)) {
+    return parseHttpxUrl(trimmed).href;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    return trimmed; // some other scheme — not ours to resolve
+  }
+  const parsed = typeof base === "string" ? parseHttpxUrl(base) : base;
+  // Borrow WHATWG path resolution against a dummy authority.
+  const resolved = new URL(trimmed, `http://base${parsed.path}${parsed.search}`);
+  return `httpx://${parsed.jid}${resolved.pathname}${resolved.search}`;
+}
+
 export function formatHttpxUrl(parts: {
   jid: string;
   path?: string;

@@ -19,7 +19,12 @@ export {
 export * from "./codec/index.js";
 
 // URLs and session abstraction
-export { formatHttpxUrl, parseHttpxUrl, type HttpxUrl } from "./urls.js";
+export {
+  formatHttpxUrl,
+  parseHttpxUrl,
+  resolveHttpxUrl,
+  type HttpxUrl,
+} from "./urls.js";
 export {
   bareJid,
   jidDomain,

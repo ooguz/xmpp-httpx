@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatHttpxUrl, parseHttpxUrl } from "../../src/urls.js";
+import {
+  formatHttpxUrl,
+  parseHttpxUrl,
+  resolveHttpxUrl,
+} from "../../src/urls.js";
 
 describe("httpx URLs", () => {
   it("parses a full URL", () => {
@@ -34,6 +38,33 @@ describe("httpx URLs", () => {
     expect(formatHttpxUrl({ jid: "a@b.org" })).toBe("httpx://a@b.org/");
     expect(formatHttpxUrl({ jid: "a@b.org", path: "x", search: "q=1" })).toBe(
       "httpx://a@b.org/x?q=1",
+    );
+  });
+
+  it("resolves references like a browser", () => {
+    const base = "httpx://web@example.org/docs/page.html?x=1";
+    expect(resolveHttpxUrl(base, "other.html")).toBe(
+      "httpx://web@example.org/docs/other.html",
+    );
+    expect(resolveHttpxUrl(base, "../img/logo.png")).toBe(
+      "httpx://web@example.org/img/logo.png",
+    );
+    expect(resolveHttpxUrl(base, "/root.html")).toBe(
+      "httpx://web@example.org/root.html",
+    );
+    expect(resolveHttpxUrl(base, "?y=2")).toBe(
+      "httpx://web@example.org/docs/page.html?y=2",
+    );
+    expect(resolveHttpxUrl(base, "httpx://other@x.org/a")).toBe(
+      "httpx://other@x.org/a",
+    );
+    // Foreign schemes pass through untouched.
+    expect(resolveHttpxUrl(base, "https://example.com/")).toBe(
+      "https://example.com/",
+    );
+    // Fragments are stripped.
+    expect(resolveHttpxUrl(base, "other.html#sec")).toBe(
+      "httpx://web@example.org/docs/other.html",
     );
   });
 });
