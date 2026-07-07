@@ -18,6 +18,7 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: BROWSER_SAFE,
+          benchmark: { include: ["test/bench/**/*.bench.ts"] },
           // Root-level testTimeout is not inherited by project entries.
           testTimeout: 15_000,
         },

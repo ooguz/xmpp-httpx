@@ -64,6 +64,20 @@ jobs:
       - run: npm ci
       - run: npm run test:e2e
 
+  bench:
+    name: Benchmarks & memory (informational)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run bench
+      - run: npm run build && node --expose-gc scripts/memcheck.mjs
+
   api-docs:
     name: API docs (GitHub Pages)
     runs-on: ubuntu-latest

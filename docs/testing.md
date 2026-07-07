@@ -91,6 +91,41 @@ resources because one session supports one `HttpxServer`) and
 `component-gateway.e2e.test.ts` (`httpxFetch` → XEP-0114 component serving
 `demo-site.ts`).
 
+## Fuzzing & adversarial testing
+
+- **`test/unit/fuzz.test.ts`** (fast-check) asserts the decoder contract:
+  for arbitrary parser-producible elements, `decodeReq`/`decodeResp`/
+  `decodeData`/`decodeHeaders` either return a value or throw
+  `CodecError`/`TypeError` — never an internal `TypeError`/`RangeError`,
+  never a hang. Also fuzzes base64 (only `SyntaxError` escapes), the URL
+  parser (only `TypeError`), and `ChunkReassembler` under random push
+  sequences.
+- **`test/integration/adversarial.test.ts`** points a hostile peer at every
+  bound in the security model — malformed `<req>`, chunk floods for unknown
+  streams, oversized streamed request bodies, unsolicited/absurd/duplicate
+  IBB opens, `<data>` for unknown sids, seq desync, and a peer that stops
+  acking — and asserts each attack yields a protocol error (or is silently
+  dropped), the victim survives, and a legitimate request still succeeds.
+  This suite drove one fix: IBB block sends are now bounded by the idle
+  timeout, not the session's full IQ timeout.
+
+## Benchmarks & memory
+
+- **`npm run bench`** (vitest bench, `test/bench/transports.bench.ts`)
+  measures per-transport round-trip throughput over the mock pair at 64 KiB
+  and 1 MiB. Numbers are comparative, not absolute (microtask delivery, no
+  real socket) — useful for spotting framing-overhead regressions and
+  tuning chunk/block sizes. As expected the transports cluster closely; IBB
+  and sipub pay a small per-block IQ-round-trip cost that the
+  fire-and-forget chunked/message transports avoid.
+- **`node --expose-gc scripts/memcheck.mjs`** (after `npm run build`) proves
+  IBB streaming is **O(block), not O(body)**: it streams 1 MiB and 16 MiB
+  bodies while sampling *live* (post-GC) heap, and fails if retention scales
+  with body size. IBB is the memory-bounded transport by design — its
+  per-block acks apply real backpressure — so it is what the audit
+  exercises; chunkedBase64 has no protocol acks and is bounded instead by
+  the receiver's `maxBufferedBytes` cap.
+
 ## Manual demo path
 
 `scripts/demo-gateway.mjs` connects to the E2E Prosody's component and
@@ -107,3 +142,4 @@ step-by-step.
 | `test` | push/PR | node project on Node 20 / 22 / 24 |
 | `browser` | push/PR | Playwright Chromium, browser project |
 | `e2e` | nightly cron, manual dispatch, pushes to main | Prosody compose + e2e project |
+| `bench` | manual dispatch | `npm run bench` + `scripts/memcheck.mjs` (informational) |
