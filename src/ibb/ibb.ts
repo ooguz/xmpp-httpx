@@ -229,7 +229,12 @@ export class IbbManager {
     const attrs: Record<string, string> =
       from !== undefined ? { type: "set", to, from } : { type: "set", to };
     try {
-      return await this.#session.iqCaller.request(xml("iq", attrs, child));
+      // Bound each block by the idle timeout — a peer that stops acking
+      // must not stall the sender for the session's full IQ timeout.
+      return await this.#session.iqCaller.request(
+        xml("iq", attrs, child),
+        this.idleTimeoutMs,
+      );
     } catch (err) {
       throw fromXmppError(err);
     }
