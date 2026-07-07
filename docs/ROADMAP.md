@@ -12,13 +12,15 @@ this file plans what comes after. Effort sizing: **S** ≤ half a day,
 Goal: make the library consumable and visible; XEP-0332 explicitly asks for
 implementations to revive its standards process — be that implementation.
 
-- [ ] **Publish `xmpp-httpx@0.5.0` to npm** (S) — everything is prepared
-  (metadata, `prepublishOnly` gate, pack verified); blocked only on the
-  owner running `npm login && npm publish`.
-- [x] **Git remote + CI activation** (S) — github.com/ooguz/xmpp-httpx,
-  README badges added.
-- [x] **API reference site** (M) — typedoc (`npm run docs:api`), deployed to
-  GitHub Pages by the `api-docs` CI job on pushes to main.
+- [ ] **Publish `xmpp-httpx@0.5.0` to npm** (S) — fully prepared (metadata,
+  `prepublishOnly` gate, pack verified, v0.5.0 tagged); owner action:
+  `npm login && npm publish` — see [RELEASING.md](../RELEASING.md).
+- [ ] **Git remote + CI activation** (S) — prepared (badges, Pages CI job,
+  repo URLs assume `ooguz/xmpp-httpx`); owner action: `gh repo create` +
+  push — see [RELEASING.md](../RELEASING.md).
+- [x] **API reference site** (M) — typedoc (`npm run docs:api`) verified
+  locally; the `api-docs` CI job deploys to GitHub Pages on pushes to main
+  once the repo exists.
 - [x] **XSF / standards feedback** (M) — [xep-0332-feedback.md](xep-0332-feedback.md)
   drafted and ready to post to standards@xmpp.org.
 - [x] **Interop matrix page** (S) — [interop.md](interop.md).
