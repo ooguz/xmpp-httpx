@@ -18,12 +18,15 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: BROWSER_SAFE,
+          // Root-level testTimeout is not inherited by project entries.
+          testTimeout: 15_000,
         },
       },
       {
         test: {
           name: "browser",
           include: BROWSER_SAFE,
+          testTimeout: 15_000,
           browser: {
             enabled: true,
             headless: true,
