@@ -63,3 +63,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:e2e
+
+  api-docs:
+    name: API docs (GitHub Pages)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run docs:api
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/api
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,5 +1,9 @@
 # xmpp-httpx
 
+[![CI](https://github.com/ooguz/xmpp-httpx/actions/workflows/ci.yml/badge.svg)](https://github.com/ooguz/xmpp-httpx/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/xmpp-httpx)](https://www.npmjs.com/package/xmpp-httpx)
+[![API docs](https://img.shields.io/badge/API-typedoc-blue)](https://ooguz.github.io/xmpp-httpx/)
+
 TypeScript implementation of [XEP-0332: HTTP over XMPP Transport](https://xmpp.org/extensions/xep-0332.html) — tunnel HTTP requests and responses through XMPP, for Node.js and browsers.
 
 XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implementation of the kind the XEP explicitly encourages, built as the foundation for a browser that navigates `httpx://user@domain/path` URLs.
@@ -13,6 +17,8 @@ XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implemen
 | [docs/testing.md](docs/testing.md) | The three vitest projects, mock-session harness, Prosody E2E, CI |
 | [docs/browser-extension.md](docs/browser-extension.md) | WebExtension architecture: connection placement, rendering pipeline, manifest strategy |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Next phases and tasks (release, hardening, extension v2, gateway product) |
+| [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | Implementation-experience write-up for the XSF standards process |
+| [docs/interop.md](docs/interop.md) | Interoperability matrix — tested servers, runtimes, peer implementations |
 | [examples/webext/README.md](examples/webext/README.md) | Build/run guide for the browser extension |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 

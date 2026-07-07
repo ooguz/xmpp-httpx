@@ -1,0 +1,14 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts", "src/node/index.ts"],
+  "out": "docs/api",
+  "name": "xmpp-httpx",
+  "readme": "README.md",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "includeVersion": true,
+  "navigationLinks": {
+    "GitHub": "https://github.com/ooguz/xmpp-httpx"
+  },
+  "hideGenerator": true
+}

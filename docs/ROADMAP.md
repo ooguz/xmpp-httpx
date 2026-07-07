@@ -12,20 +12,16 @@ this file plans what comes after. Effort sizing: **S** ≤ half a day,
 Goal: make the library consumable and visible; XEP-0332 explicitly asks for
 implementations to revive its standards process — be that implementation.
 
-- [ ] **Publish `xmpp-httpx@0.5.0` to npm** (S) — needs the owner's npm
-  auth; add `repository`/`homepage` once a public git remote exists;
-  consider `npm publish --provenance` from CI.
-- [ ] **Git remote + CI activation** (S) — push to a forge so the four CI
-  jobs actually run; add a README badge.
-- [ ] **API reference site** (M) — typedoc over the public exports,
-  published via CI (GitHub Pages); the JSDoc is already written for this.
-- [ ] **XSF / standards feedback** (M) — write up the implementation
-  experience (everything in `docs/protocol-notes.md`: the jingle-in-`<data>`
-  ambiguity, chunk-loss signaling gap, `maxChunkSize` units, request-body
-  negotiation gap) and post to the XSF standards list proposing XEP-0332
-  move back to Experimental with fixes.
-- [ ] **Interop matrix page** (S) — document tested servers (Prosody 13) and
-  invite reports against ejabberd/Openfire/Tigase.
+- [ ] **Publish `xmpp-httpx@0.5.0` to npm** (S) — everything is prepared
+  (metadata, `prepublishOnly` gate, pack verified); blocked only on the
+  owner running `npm login && npm publish`.
+- [x] **Git remote + CI activation** (S) — github.com/ooguz/xmpp-httpx,
+  README badges added.
+- [x] **API reference site** (M) — typedoc (`npm run docs:api`), deployed to
+  GitHub Pages by the `api-docs` CI job on pushes to main.
+- [x] **XSF / standards feedback** (M) — [xep-0332-feedback.md](xep-0332-feedback.md)
+  drafted and ready to post to standards@xmpp.org.
+- [x] **Interop matrix page** (S) — [interop.md](interop.md).
 
 Acceptance: package installable from npm; docs site live; feedback thread
 opened.
