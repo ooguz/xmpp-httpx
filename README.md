@@ -95,11 +95,15 @@ npm run build                       # emit dist/
 
 The integration suite runs both endpoints against an in-memory stanza router (`test/integration/mock-session.ts`) with fault injection (reordered chunk delivery), so the full protocol — including IBB flow control — is exercised without a real XMPP server.
 
+## The browser
+
+[`examples/webext/`](examples/webext/) is a working **WebExtension for Firefox and Chromium** that navigates `httpx://` URLs with this library: an extension-page browser chrome (address bar, history), an omnibox keyword (`httpx server@example.org/page` ⏎), clickable `ext+httpx://` links on Firefox, and a sanitized rendering pipeline (DOMPurify → blob-URL subresources → script-less sandboxed iframe). See its README for the build/run instructions and `scripts/demo-gateway.mjs` for a demo site to browse.
+
 ## Roadmap
 
-- v0.2/0.3 features (chunked + IBB) are already in; next: entity caps (XEP-0115), sipub (XEP-0137), Jingle transport
-- Dockerized Prosody E2E suite and vitest browser-mode CI
-- The `httpx://` browser integration, as a separate package consuming `xmpp-httpx/client`
+- XEP-0348 (signing HTTP requests over XMPP), roster-driven authorization policies
+- Content-Encoding negotiation (compressed bodies), EXI
+- Extension polish: styles (sanitized CSS subset), history UI, multiple tabs
 
 ## License
 
