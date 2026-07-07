@@ -1,0 +1,17 @@
+name: xmpp-httpx-e2e
+
+services:
+  prosody:
+    image: prosodyim/prosody:13.0
+    ports:
+      # Host ports are offset to avoid clashing with any local XMPP install.
+      - "15222:5222" # c2s (unused by tests; ws is the tested transport)
+      - "15280:5280" # http/websocket
+      - "15347:5347" # external components (XEP-0114)
+    volumes:
+      - ./prosody/prosody.cfg.lua:/etc/prosody/prosody.cfg.lua:ro
+    healthcheck:
+      test: ["CMD", "prosodyctl", "status"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
