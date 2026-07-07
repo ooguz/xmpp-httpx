@@ -24,6 +24,13 @@ const HOP_BY_HOP = [
 export interface OriginProxyOptions {
   /** Add X-Forwarded-For with the requester's bare JID. Default true. */
   forwardedFor?: boolean;
+  /**
+   * Header carrying the requester's full, XMPP-authenticated JID — the
+   * httpx replacement for cookies/Basic auth: the origin can trust it
+   * because the XMPP server verified it via SASL. Default "x-httpx-from";
+   * pass false to omit.
+   */
+  jidHeader?: string | false;
   /** Follow redirects at the proxy instead of forwarding them. Default false. */
   followRedirects?: boolean;
 }
@@ -44,6 +51,10 @@ export function createOriginProxyHandler(
     if (options.forwardedFor !== false) {
       const bare = req.from.split("/")[0] ?? req.from;
       headers.set("x-forwarded-for", bare);
+    }
+    if (options.jidHeader !== false) {
+      const headerName = options.jidHeader ?? "x-httpx-from";
+      headers.set(headerName, req.from);
     }
 
     const hasBody =
