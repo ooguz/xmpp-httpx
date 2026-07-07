@@ -208,7 +208,11 @@ export class HttpxClient {
     resultPromise.catch(() => {});
 
     if (streamBody && stream) {
-      await this.#sendRequestBody(to, from, streamBody, stream, signal);
+      try {
+        await this.#sendRequestBody(to, from, streamBody, stream, signal);
+      } catch (err) {
+        throw fromXmppError(err);
+      }
     }
 
     let result: Element;
@@ -232,7 +236,7 @@ export class HttpxClient {
         : {}),
       version: resp.version,
       headers: resp.headers,
-      body: this.#openResponseBody(peer, resp.data),
+      body: this.#openResponseBody(peer, resp.data, signal),
     });
   }
 
@@ -277,6 +281,7 @@ export class HttpxClient {
   #openResponseBody(
     peer: string,
     data: DataDescriptor | undefined,
+    signal?: AbortSignal | undefined,
   ): ReadableStream<Uint8Array> | null {
     if (data === undefined) return null;
 
@@ -291,18 +296,40 @@ export class HttpxClient {
           this.#options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES,
         idleTimeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
       });
+      if (signal) {
+        const onAbort = () =>
+          reassembler.abort(new HttpxError("aborted", "request aborted"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        // Chained (not clobbered) by ChunkRouter.expect below.
+        reassembler.onFinished = () =>
+          signal.removeEventListener("abort", onAbort);
+      }
       this.#router.expect(peer, reassembler);
       return reassembler.readable;
     }
 
     if (data.kind === "ibb") {
       const sid = data.sid;
-      return deferredStream(async () => {
+      const body = deferredStream(async () => {
         const incoming = await this.#ibb.expectIncoming(peer, sid, {
           timeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
         });
         return incoming.readable;
       });
+      // Best-effort: an unread body is torn down on abort. A body the
+      // consumer is actively reading (locked) is the consumer's to abandon.
+      signal?.addEventListener(
+        "abort",
+        () => {
+          if (!body.locked) {
+            void body
+              .cancel(new HttpxError("aborted", "request aborted"))
+              .catch(() => {});
+          }
+        },
+        { once: true },
+      );
+      return body;
     }
 
     throw new HttpxError(
