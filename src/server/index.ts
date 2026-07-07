@@ -9,5 +9,7 @@ export {
   allowAll,
   allowList,
   denyAll,
+  manualPolicy,
+  presencePolicy,
   type AuthorizeFn,
 } from "./policy.js";
