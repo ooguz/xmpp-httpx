@@ -65,10 +65,40 @@ function escapedLength(text: string): number {
   return text.length + extra;
 }
 
-/** Decoded-byte chunk/block size honoring the requester's maxChunkSize. */
+/**
+ * Decoded-byte chunk/block size. An explicit requester maxChunkSize is
+ * honored up to the spec maximum (the requester knows its stanza limits);
+ * without one we stay under the conservative SAFE_CHUNK_SIZE_CAP.
+ */
 export function resolveChunkSize(requesterMax: number | undefined): number {
-  const wanted = Math.min(requesterMax ?? DEFAULT_CHUNK_SIZE, SAFE_CHUNK_SIZE_CAP);
+  const wanted =
+    requesterMax ?? Math.min(DEFAULT_CHUNK_SIZE, SAFE_CHUNK_SIZE_CAP);
   return Math.min(MAX_CHUNK_SIZE, Math.max(MIN_CHUNK_SIZE, wanted));
+}
+
+/**
+ * Derives inline/chunk budgets from a known server stanza-size limit
+ * (advertised via XEP-0478 stream limits, or from server config). The
+ * defaults assume only the RFC 6120 10 KiB floor; servers commonly allow
+ * 128 KiB－1 MiB, and larger budgets mean fewer stanzas per body:
+ *
+ *   new HttpxClient(session, { ...stanzaBudgets(262144) })
+ *   new HttpxServer(session, { ...stanzaBudgets(262144) })
+ */
+export function stanzaBudgets(maxStanzaBytes: number): {
+  inlineBudgetBytes: number;
+  maxChunkSize: number;
+} {
+  // Envelope headroom: iq/message wrapper, req/resp attributes, headers.
+  const ENVELOPE_HEADROOM = 2048;
+  const CHUNK_ENVELOPE = 512;
+  const inlineBudgetBytes = Math.max(1024, maxStanzaBytes - ENVELOPE_HEADROOM);
+  const decodedChunk = Math.floor(((maxStanzaBytes - CHUNK_ENVELOPE) * 3) / 4);
+  const maxChunkSize = Math.min(
+    MAX_CHUNK_SIZE,
+    Math.max(MIN_CHUNK_SIZE, decodedChunk),
+  );
+  return { inlineBudgetBytes, maxChunkSize };
 }
 
 /**

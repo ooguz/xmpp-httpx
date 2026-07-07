@@ -109,7 +109,19 @@ describe("selectEncoding", () => {
   it("resolveChunkSize honors the requester cap and library bounds", () => {
     expect(resolveChunkSize(undefined)).toBe(4096);
     expect(resolveChunkSize(1024)).toBe(1024);
-    expect(resolveChunkSize(65536)).toBe(8192); // SAFE_CHUNK_SIZE_CAP
+    // An explicit advertisement is honored up to the spec maximum.
+    expect(resolveChunkSize(65536)).toBe(65536);
+    expect(resolveChunkSize(999_999)).toBe(65536);
     expect(resolveChunkSize(10)).toBe(256);
+  });
+
+  it("stanzaBudgets derives budgets from a stanza-size limit", async () => {
+    const { stanzaBudgets } = await import("../../src/transport/select.js");
+    const small = stanzaBudgets(10 * 1024); // the RFC 6120 floor
+    expect(small.inlineBudgetBytes).toBe(10 * 1024 - 2048);
+    expect(small.maxChunkSize).toBeLessThan(10 * 1024);
+    const big = stanzaBudgets(256 * 1024);
+    expect(big.inlineBudgetBytes).toBe(256 * 1024 - 2048);
+    expect(big.maxChunkSize).toBe(65536); // spec ceiling
   });
 });

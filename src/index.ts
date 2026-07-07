@@ -57,6 +57,7 @@ export {
 export {
   resolveChunkSize,
   selectEncoding,
+  stanzaBudgets,
   type BodySource,
   type EncodingDecision,
   type SelectInput,
