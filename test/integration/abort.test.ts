@@ -127,6 +127,35 @@ describe("abort and cancel propagation", () => {
     await vi.waitFor(() => expect(onError).toHaveBeenCalled());
   });
 
+  it("a connection dying mid-stream surfaces as a timeout error", async () => {
+    const { client, serverSession } = setup(
+      () => ({ status: 200, body: slowStream(500_000) }),
+      { preferredStreams: ["chunkedBase64"] },
+      { idleTimeoutMs: 100 },
+    );
+
+    // Simulate the transport dying: after a few chunks, deliveries stop.
+    let delivered = 0;
+    serverSession.deliverHook = (stanza, deliver) => {
+      if (stanza.getName() === "message" && ++delivered > 3) return; // link dead
+      queueMicrotask(deliver);
+    };
+
+    const resp = await client.request("server@example.org", {});
+    const reader = resp.body!.getReader();
+    let caught: unknown;
+    try {
+      for (let i = 0; i < 1000; i++) {
+        const { done } = await reader.read();
+        if (done) throw new Error("stream ended cleanly despite dead link");
+      }
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HttpxError);
+    expect((caught as HttpxError).code).toBe("timeout");
+  });
+
   it("client.close() aborts live chunked streams", async () => {
     const { client } = setup(
       () => ({ status: 200, body: slowStream(500_000) }),
