@@ -193,7 +193,7 @@ describe("failure mapping", () => {
       xml(
         "req",
         { xmlns: NS_HTTPX, method: "POST", resource: "/", version: "1.1" },
-        xml("data", null, xml("sipub", { xmlns: "http://jabber.org/protocol/sipub", id: "p1" })),
+        xml("data", null, xml("carrier-pigeon", { xmlns: "urn:example:rfc1149" })),
       ),
     );
     const result = await clientSession.iqCaller.request(iq, 1000);

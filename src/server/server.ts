@@ -21,10 +21,13 @@ import {
   ChunkReassembler,
   ChunkRouter,
 } from "../transport/chunked.js";
+import { createDefaultRegistry } from "../transport/default-registry.js";
 import { inlineToBytes, isInline } from "../transport/inline.js";
+import type { TransportRegistry } from "../transport/registry.js";
 import {
   selectEncoding,
   type BodySource,
+  type StreamAcceptFlags,
   type StreamMechanism,
 } from "../transport/select.js";
 import type { HttpMethod, HttpxBodyInit } from "../types.js";
@@ -53,7 +56,7 @@ export interface HttpxServerRequest {
   headers: Headers;
   body: ReadableStream<Uint8Array> | null;
   /** What the requester accepts for the response body. */
-  accept: { ibb: boolean; chunked: boolean; maxChunkSize?: number };
+  accept: StreamAcceptFlags;
 }
 
 export interface HttpxHandlerResponse {
@@ -124,6 +127,7 @@ export class HttpxServer {
   #handler: HttpxHandler | undefined;
   #router: ChunkRouter | undefined;
   #ibb: IbbManager | undefined;
+  #registry: TransportRegistry | undefined;
   #started = false;
 
   constructor(session: XmppSession, options: HttpxServerOptions = {}) {
@@ -141,6 +145,7 @@ export class HttpxServer {
     this.#started = true;
     this.#router = ChunkRouter.acquire(this.#session);
     this.#ibb = IbbManager.acquire(this.#session);
+    this.#registry = createDefaultRegistry(this.#session);
     this.#session.iqCallee.set(NS_HTTPX, "req", (ctx) => this.#onReq(ctx));
     if (this.#options.advertise !== false) {
       advertiseHttpx(this.#session);
@@ -154,6 +159,8 @@ export class HttpxServer {
     this.#router = undefined;
     this.#ibb?.release();
     this.#ibb = undefined;
+    this.#registry?.releaseAll();
+    this.#registry = undefined;
     // The iqCallee handler stays registered (middleware has no removal);
     // it answers service-unavailable while stopped.
   }
@@ -194,7 +201,7 @@ export class HttpxServer {
     // Materialize the request body (may be a not-yet-started stream).
     let body: ReadableStream<Uint8Array> | null;
     try {
-      body = this.#openRequestBody(from, req.data);
+      body = this.#openRequestBody(from, req.data, to);
     } catch (err) {
       if (err instanceof HttpxError && err.code === "not-implemented") {
         return this.#respond({
@@ -226,6 +233,8 @@ export class HttpxServer {
       accept: {
         ibb: req.accept.ibb,
         chunked: true,
+        sipub: req.accept.sipub,
+        jingle: req.accept.jingle,
         ...(req.maxChunkSize !== undefined
           ? { maxChunkSize: req.maxChunkSize }
           : {}),
@@ -355,6 +364,7 @@ export class HttpxServer {
   #openRequestBody(
     from: string,
     data: DataDescriptor | undefined,
+    ourJid: string,
   ): ReadableStream<Uint8Array> | null {
     if (data === undefined) return null;
     const maxBytes =
@@ -391,6 +401,18 @@ export class HttpxServer {
       );
     }
 
+    if (data.kind === "sipub" || data.kind === "jingle") {
+      const transport = this.#registry!.get(data.kind)!;
+      const timeoutMs = this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      return limitStream(
+        transport.receive(from, data, {
+          timeoutMs,
+          ...(ourJid !== "" ? { ourJid } : {}),
+        }),
+        maxBytes,
+      );
+    }
+
     throw new HttpxError(
       "not-implemented",
       `request uses unsupported data mechanism`,
@@ -407,7 +429,7 @@ export class HttpxServer {
     streamContext?: {
       peer: string;
       ourJid: string;
-      accept: { ibb: boolean; chunked: boolean; maxChunkSize?: number };
+      accept: StreamAcceptFlags;
     },
   ): Element {
     const resp: RespStanza = {
@@ -465,6 +487,26 @@ export class HttpxServer {
             decision.blockSize,
             this.#materializeStream(normalized),
           );
+          break;
+        }
+        case "sipub":
+        case "jingle": {
+          const transport = this.#registry!.get(decision.mode)!;
+          resp.data = transport.offer(streamContext.peer, {
+            open: () => this.#materializeStream(normalized),
+            ...(contentLengthOf(normalized) !== undefined
+              ? { contentLength: contentLengthOf(normalized)! }
+              : {}),
+            ...(contentType !== null ? { contentType } : {}),
+            ...(streamContext.ourJid !== ""
+              ? { from: streamContext.ourJid }
+              : {}),
+            ...(decision.mode === "jingle"
+              ? { blockSize: decision.blockSize }
+              : {}),
+            onError: (err) =>
+              this.#options.onError?.(err, { from: streamContext.peer }),
+          });
           break;
         }
         case "too-large": {
@@ -543,6 +585,12 @@ export class HttpxServer {
       });
     }, 0);
   }
+}
+
+function contentLengthOf(normalized: NormalizedResponse): number | undefined {
+  if (normalized.source.kind === "bytes") return normalized.source.bytes.length;
+  if (normalized.source.kind === "stream") return normalized.source.contentLength;
+  return undefined;
 }
 
 function iqError(type: "cancel" | "modify" | "wait", condition: string): Element {

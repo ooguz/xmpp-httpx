@@ -5,7 +5,13 @@ import {
   NS_DISCO_INFO,
   NS_HTTPX,
   NS_IBB,
+  NS_JINGLE,
+  NS_JINGLE_FT,
+  NS_JINGLE_IBB,
   NS_SHIM,
+  NS_SI,
+  NS_SIPUB,
+  NS_SI_FT,
 } from "./constants.js";
 import { bareJid, type XmppSession } from "./session.js";
 
@@ -17,7 +23,20 @@ export const DEFAULT_IDENTITY: CapsIdentity = {
 
 /** The feature set this library implements/advertises. */
 export function httpxFeatures(extra: readonly string[] = []): string[] {
-  return [NS_DISCO_INFO, NS_CAPS, NS_HTTPX, NS_SHIM, NS_IBB, ...extra];
+  return [
+    NS_DISCO_INFO,
+    NS_CAPS,
+    NS_HTTPX,
+    NS_SHIM,
+    NS_IBB,
+    NS_SIPUB,
+    NS_SI,
+    NS_SI_FT,
+    NS_JINGLE,
+    NS_JINGLE_FT,
+    NS_JINGLE_IBB,
+    ...extra,
+  ];
 }
 
 /**

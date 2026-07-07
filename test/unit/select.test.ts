@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveChunkSize, selectEncoding } from "../../src/transport/select.js";
 
 const BASE = {
-  accept: { ibb: true, chunked: true },
+  accept: { ibb: true, chunked: true, sipub: true, jingle: true },
   inlineBudgetBytes: 4096,
   preferredStreams: ["ibb", "chunkedBase64"] as const,
 };
@@ -62,7 +62,7 @@ describe("selectEncoding", () => {
       selectEncoding({
         ...BASE,
         body: { kind: "bytes", bytes },
-        accept: { ibb: false, chunked: true },
+        accept: { ...BASE.accept, ibb: false },
       }).mode,
     ).toBe("chunkedBase64");
     expect(
@@ -82,9 +82,28 @@ describe("selectEncoding", () => {
     const decision = selectEncoding({
       ...BASE,
       body: { kind: "stream" },
-      accept: { ibb: false, chunked: false },
+      accept: { ibb: false, chunked: false, sipub: false, jingle: false },
     });
     expect(decision).toEqual({ mode: "too-large" });
+  });
+
+  it("falls through to sipub/jingle when preferred", () => {
+    const bytes = new Uint8Array(100_000);
+    expect(
+      selectEncoding({
+        ...BASE,
+        body: { kind: "bytes", bytes },
+        preferredStreams: ["sipub", "jingle"],
+      }).mode,
+    ).toBe("sipub");
+    expect(
+      selectEncoding({
+        ...BASE,
+        body: { kind: "bytes", bytes },
+        accept: { ...BASE.accept, sipub: false },
+        preferredStreams: ["sipub", "jingle"],
+      }).mode,
+    ).toBe("jingle");
   });
 
   it("resolveChunkSize honors the requester cap and library bounds", () => {

@@ -33,13 +33,49 @@ accident.
   protocol level; consumers that need integrity should compare against
   `Content-Length`.
 
+## sipub (XEP-0137 over XEP-0095 SI)
+
+- Only the **IBB stream method** is offered and accepted; a received SI
+  offer without `http://jabber.org/protocol/ibb` among its stream-method
+  options is refused with `<no-valid-streams/>`.
+- The sid chain is `<starting sid>` = SI `id` = XEP-0047 sid — one
+  identifier from handshake to data plane.
+- Each publication is **one-shot** and bound to the requesting peer's bare
+  JID (XEP-0137 anticipates third-party/multi-consumer starts; for httpx
+  that would leak response bodies). A second `<start>`, or one from another
+  JID, is refused (`not-acceptable` / `forbidden`).
+- Unclaimed publications expire after 60 s (`DEFAULT_OFFER_TTL_MS`).
+- `<file size='0'>` when the body length is unknown; `size` is never
+  trusted on receive (the IBB `<close/>` terminates the body).
+- XEP-0137's own examples are internally inconsistent (start id as
+  attribute vs text); we follow Example 7 (attribute) strictly.
+
+## jingle (XEP-0166 subset)
+
+- The `<jingle action='session-initiate'>` embedded in `<data>` **is** the
+  session-initiate — no separate initiate IQ is sent, and it receives no
+  Jingle-level ack (the httpx IQ result carries it). This deviation is
+  forced by XEP-0332's design. As a hedge, a duplicate initiate IQ bearing
+  a known session id is acked.
+- Content is XEP-0234 `file-transfer:5` description + **XEP-0261 IBB
+  transport only** — the description is echoed verbatim and never
+  interpreted on receive (XEP-0332's own example embeds an RTP session
+  that cannot carry an HTTP body). Offers with a non-IBB transport are
+  declined via `session-terminate <decline/>`.
+- The XEP-0261 transport sid is a plain XEP-0047 sid; the responder may
+  lower `block-size` in session-accept but must echo the sid unchanged.
+- XEP-0234's mandatory `<hash/>`/`<hash-used/>` is omitted (streams cannot
+  be hashed up front); receivers must not require it.
+- Unknown-session jingle IQs get `item-not-found` + `<unknown-session/>`;
+  `session-info`/`transport-info` on known sessions are acked and ignored.
+
 ## Request bodies
 
 - The `sipub`/`ibb`/`jingle` attributes of `<req>` describe what the
   **requester accepts for the response**. The XEP provides no negotiation for
   *request* bodies; we send small bodies inline and stream large ones via
-  IBB (preferred) or chunked messages, assuming the responder implements the
-  same mechanisms it would use for responses.
+  IBB (default preference) or chunked messages — sipub/jingle are opt-in
+  for sending (`preferredStreams`) but always accepted on receive.
 - The responder replies to the `<req>` IQ **after** consuming a streamed
   request body, so the client's IQ timeout must cover the entire body
   transfer (default 60 s; override per request).

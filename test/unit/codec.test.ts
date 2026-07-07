@@ -153,12 +153,65 @@ describe("codec error handling", () => {
   it("decodes unknown data mechanisms as unsupported", () => {
     const el = parse(
       `<resp xmlns='${NS_HTTPX}' version='1.1' statusCode='200'>` +
-        `<data><sipub xmlns='http://jabber.org/protocol/sipub' id='pub1'/></data></resp>`,
+        `<data><carrier-pigeon xmlns='urn:example:rfc1149'/></data></resp>`,
     );
     const resp = decodeResp(el);
     expect(resp.data?.kind).toBe("unsupported");
     if (resp.data?.kind === "unsupported") {
-      expect(resp.data.name).toBe("sipub");
+      expect(resp.data.name).toBe("carrier-pigeon");
     }
+  });
+
+  it("decodes sipub descriptors (and rejects malformed ones)", () => {
+    const el = parse(
+      `<resp xmlns='${NS_HTTPX}' version='1.1' statusCode='200'>` +
+        `<data><sipub xmlns='http://jabber.org/protocol/sipub' id='pub1' ` +
+        `from='srv@example.org' profile='http://jabber.org/protocol/si/profile/file-transfer'/></data></resp>`,
+    );
+    const resp = decodeResp(el);
+    expect(resp.data?.kind).toBe("sipub");
+    if (resp.data?.kind === "sipub") expect(resp.data.id).toBe("pub1");
+
+    // Missing id → protocol error.
+    expect(() =>
+      decodeResp(
+        parse(
+          `<resp xmlns='${NS_HTTPX}' version='1.1' statusCode='200'>` +
+            `<data><sipub xmlns='http://jabber.org/protocol/sipub'/></data></resp>`,
+        ),
+      ),
+    ).toThrow(CodecError);
+
+    // Wrong namespace → someone else's extension, not ours.
+    const foreign = decodeResp(
+      parse(
+        `<resp xmlns='${NS_HTTPX}' version='1.1' statusCode='200'>` +
+          `<data><sipub xmlns='urn:example:other' id='x'/></data></resp>`,
+      ),
+    );
+    expect(foreign.data?.kind).toBe("unsupported");
+  });
+
+  it("decodes jingle descriptors (session-initiate only)", () => {
+    const el = parse(
+      `<resp xmlns='${NS_HTTPX}' version='1.1' statusCode='200'>` +
+        `<data><jingle xmlns='urn:xmpp:jingle:1' action='session-initiate' ` +
+        `initiator='srv@example.org' sid='j1'><content creator='initiator' name='b'/></jingle></data></resp>`,
+    );
+    const resp = decodeResp(el);
+    expect(resp.data?.kind).toBe("jingle");
+    if (resp.data?.kind === "jingle") {
+      expect(resp.data.sid).toBe("j1");
+      expect(resp.data.element.getChild("content")).toBeDefined();
+    }
+
+    expect(() =>
+      decodeResp(
+        parse(
+          `<resp xmlns='${NS_HTTPX}' version='1.1' statusCode='200'>` +
+            `<data><jingle xmlns='urn:xmpp:jingle:1' action='session-info' sid='j1'/></data></resp>`,
+        ),
+      ),
+    ).toThrow(CodecError);
   });
 });

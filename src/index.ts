@@ -55,10 +55,18 @@ export {
   type BodySource,
   type EncodingDecision,
   type SelectInput,
+  type StreamAcceptFlags,
   type StreamMechanism,
 } from "./transport/select.js";
-export { TransportRegistry, type BodyTransport } from "./transport/registry.js";
+export {
+  TransportRegistry,
+  type BodyOffer,
+  type BodyTransport,
+} from "./transport/registry.js";
+export { createDefaultRegistry } from "./transport/default-registry.js";
 export { IbbManager, type IbbInStream, type IbbOutStream } from "./ibb/ibb.js";
+export * from "./sipub/index.js";
+export * from "./jingle/index.js";
 
 // Client and server
 export * from "./client/index.js";

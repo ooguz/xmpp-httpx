@@ -10,6 +10,23 @@ export const NS_DISCO_INFO = "http://jabber.org/protocol/disco#info";
 export const NS_CAPS = "http://jabber.org/protocol/caps";
 /** RFC 6120 stanza error conditions. */
 export const NS_STANZAS = "urn:ietf:params:xml:ns:xmpp-stanzas";
+/** XEP-0137: Publishing Stream Initiation Requests. */
+export const NS_SIPUB = "http://jabber.org/protocol/sipub";
+/** XEP-0095: Stream Initiation. */
+export const NS_SI = "http://jabber.org/protocol/si";
+/** XEP-0096: SI File Transfer profile. */
+export const NS_SI_FT = "http://jabber.org/protocol/si/profile/file-transfer";
+/** XEP-0020: Feature Negotiation. */
+export const NS_FEATURE_NEG = "http://jabber.org/protocol/feature-neg";
+/** XEP-0004: Data Forms. */
+export const NS_XDATA = "jabber:x:data";
+/** XEP-0166: Jingle. */
+export const NS_JINGLE = "urn:xmpp:jingle:1";
+export const NS_JINGLE_ERRORS = "urn:xmpp:jingle:errors:1";
+/** XEP-0234: Jingle File Transfer. */
+export const NS_JINGLE_FT = "urn:xmpp:jingle:apps:file-transfer:5";
+/** XEP-0261: Jingle In-Band Bytestreams transport. */
+export const NS_JINGLE_IBB = "urn:xmpp:jingle:transports:ibb:1";
 
 export const HTTP_VERSION = "1.1";
 
@@ -38,3 +55,5 @@ export const DEFAULT_MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_IBB_BLOCK_SIZE = 4096;
 /** How long an unclaimed incoming IBB <open> is held before being refused. */
 export const DEFAULT_IBB_ACCEPT_TIMEOUT_MS = 5_000;
+/** Unclaimed sipub publications / jingle offers expire after this. */
+export const DEFAULT_OFFER_TTL_MS = 60_000;

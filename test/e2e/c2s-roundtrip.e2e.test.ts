@@ -101,4 +101,31 @@ describe("c2s round-trips over a real Prosody", () => {
     const resp = await client.request(bob.jid, { resource: "/missing" });
     expect(resp.statusCode).toBe(404);
   });
+
+  // One iqCallee handler per session → a server with a different stream
+  // preference needs its own session; a second resource of bob provides one.
+  for (const mechanism of ["sipub", "jingle"] as const) {
+    it(`large response body over ${mechanism}`, async () => {
+      const bob2 = await connectUser("bob", "e2e-bob", `web-${mechanism}`);
+      const server2 = new HttpxServer(bob2.session, {
+        authorize: allowAll(),
+        preferredStreams: [mechanism],
+        onError: (err) => console.error(`[e2e] ${mechanism} server error:`, err),
+      });
+      server2.handle(() => ({
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+        body: patternBytes(120_000),
+      }));
+      server2.start();
+      try {
+        const resp = await client.request(bob2.jid, { resource: "/stream" });
+        expect(resp.statusCode).toBe(200);
+        expect(await bytesFromStream(resp.body!)).toEqual(patternBytes(120_000));
+      } finally {
+        server2.stop();
+        await bob2.stop();
+      }
+    });
+  }
 });

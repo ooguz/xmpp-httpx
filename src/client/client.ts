@@ -19,6 +19,8 @@ import {
   ChunkReassembler,
   ChunkRouter,
 } from "../transport/chunked.js";
+import { createDefaultRegistry } from "../transport/default-registry.js";
+import type { TransportRegistry } from "../transport/registry.js";
 import { inlineToBytes, isInline } from "../transport/inline.js";
 import {
   selectEncoding,
@@ -39,8 +41,8 @@ export interface HttpxClientOptions {
   defaultTimeoutMs?: number;
   /** Advertised in <req maxChunkSize=…> for chunked responses. */
   maxChunkSize?: number;
-  /** Response-body mechanisms to advertise. sipub/jingle are always false in v1. */
-  accept?: { ibb?: boolean };
+  /** Response-body mechanisms to advertise; all default to true. */
+  accept?: { ibb?: boolean; sipub?: boolean; jingle?: boolean };
   /** Check the peer for urn:xmpp:http via disco#info first. Default true. */
   discover?: boolean;
   /** Inline budget for request bodies (encoded bytes). */
@@ -77,6 +79,28 @@ function normalizeBody(body: HttpxBodyInit | undefined): NormalizedBody {
   return { source: { kind: "element", element: body as Element } };
 }
 
+/**
+ * Best-effort teardown of a not-yet-read body on abort. A body the consumer
+ * is actively reading (locked) is the consumer's to abandon.
+ */
+function attachAbortCancel(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal | undefined,
+): ReadableStream<Uint8Array> {
+  signal?.addEventListener(
+    "abort",
+    () => {
+      if (!body.locked) {
+        void body
+          .cancel(new HttpxError("aborted", "request aborted"))
+          .catch(() => {});
+      }
+    },
+    { once: true },
+  );
+  return body;
+}
+
 async function withAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
@@ -104,6 +128,7 @@ export class HttpxClient {
   readonly #options: HttpxClientOptions;
   readonly #router: ChunkRouter;
   readonly #ibb: IbbManager;
+  readonly #registry: TransportRegistry;
   readonly #disco: DiscoCache;
   #closed = false;
 
@@ -112,6 +137,7 @@ export class HttpxClient {
     this.#options = options;
     this.#router = ChunkRouter.acquire(session);
     this.#ibb = IbbManager.acquire(session);
+    this.#registry = createDefaultRegistry(session);
     this.#disco = new DiscoCache(session);
   }
 
@@ -140,14 +166,15 @@ export class HttpxClient {
     }
 
     const acceptIbb = this.#options.accept?.ibb ?? true;
+    const acceptSipub = this.#options.accept?.sipub ?? true;
+    const acceptJingle = this.#options.accept?.jingle ?? true;
+    const contentType = headers.get("content-type");
     const decision = selectEncoding({
       body: source,
-      ...(headers.get("content-type") !== null
-        ? { contentType: headers.get("content-type")! }
-        : {}),
+      ...(contentType !== null ? { contentType } : {}),
       // The XEP offers no way to learn what the responder accepts for
       // *request* bodies; assume the mechanisms we ourselves implement.
-      accept: { ibb: acceptIbb, chunked: true },
+      accept: { ibb: acceptIbb, chunked: true, sipub: true, jingle: true },
       inlineBudgetBytes: this.#options.inlineBudgetBytes ?? DEFAULT_INLINE_BUDGET,
       preferredStreams: this.#options.preferredStreams ?? ["ibb", "chunkedBase64"],
     });
@@ -181,6 +208,32 @@ export class HttpxClient {
         streamBody = { mechanism: "ibb", id, blockSize: decision.blockSize };
         break;
       }
+      case "sipub":
+      case "jingle": {
+        // Handshake-driven: the server calls back; nothing to send post-IQ.
+        const transport = this.#registry.get(decision.mode)!;
+        const open = () =>
+          stream ??
+          (source.kind === "bytes"
+            ? streamFromBytes(source.bytes)
+            : source.kind === "element"
+              ? streamFromBytes(textEncoder.encode(source.element.toString()))
+              : streamFromBytes(new Uint8Array(0)));
+        data = transport.offer(to, {
+          open,
+          ...(source.kind === "bytes"
+            ? { contentLength: source.bytes.length }
+            : source.kind === "stream" && source.contentLength !== undefined
+              ? { contentLength: source.contentLength }
+              : {}),
+          ...(contentType !== null ? { contentType } : {}),
+          ...(from !== undefined ? { from } : {}),
+          ...(decision.mode === "jingle"
+            ? { blockSize: decision.blockSize }
+            : {}),
+        });
+        break;
+      }
       case "too-large":
         throw new HttpxError("payload-too-large", "request body too large");
     }
@@ -189,7 +242,7 @@ export class HttpxClient {
       method: init.method ?? "GET",
       resource: init.resource ?? "/",
       version: HTTP_VERSION,
-      accept: { sipub: false, ibb: acceptIbb, jingle: false },
+      accept: { sipub: acceptSipub, ibb: acceptIbb, jingle: acceptJingle },
       headers,
       ...(this.#options.maxChunkSize !== undefined
         ? { maxChunkSize: this.#options.maxChunkSize }
@@ -316,20 +369,18 @@ export class HttpxClient {
         });
         return incoming.readable;
       });
-      // Best-effort: an unread body is torn down on abort. A body the
-      // consumer is actively reading (locked) is the consumer's to abandon.
-      signal?.addEventListener(
-        "abort",
-        () => {
-          if (!body.locked) {
-            void body
-              .cancel(new HttpxError("aborted", "request aborted"))
-              .catch(() => {});
-          }
-        },
-        { once: true },
-      );
-      return body;
+      return attachAbortCancel(body, signal);
+    }
+
+    if (data.kind === "sipub" || data.kind === "jingle") {
+      const transport = this.#registry.get(data.kind)!;
+      const body = transport.receive(peer, data, {
+        timeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+        ...(this.#options.from !== undefined
+          ? { ourJid: this.#options.from }
+          : {}),
+      });
+      return attachAbortCancel(body, signal);
     }
 
     throw new HttpxError(
@@ -343,6 +394,7 @@ export class HttpxClient {
     this.#closed = true;
     this.#router.release();
     this.#ibb.release();
+    this.#registry.releaseAll();
     this.#disco.dispose();
   }
 }

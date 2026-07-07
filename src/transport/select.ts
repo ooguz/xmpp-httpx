@@ -14,7 +14,7 @@ export type BodySource =
   | { kind: "element"; element: Element }
   | { kind: "stream"; contentLength?: number };
 
-export type StreamMechanism = "ibb" | "chunkedBase64";
+export type StreamMechanism = "ibb" | "chunkedBase64" | "sipub" | "jingle";
 
 export type EncodingDecision =
   | { mode: "none" }
@@ -23,13 +23,23 @@ export type EncodingDecision =
   | { mode: "base64"; bytes: Uint8Array }
   | { mode: "ibb"; blockSize: number }
   | { mode: "chunkedBase64"; chunkSize: number }
+  | { mode: "sipub" }
+  | { mode: "jingle"; blockSize: number }
   /** Body doesn't fit inline and the peer accepts no stream mechanism. */
   | { mode: "too-large" };
+
+export interface StreamAcceptFlags {
+  ibb: boolean;
+  chunked: boolean;
+  sipub: boolean;
+  jingle: boolean;
+  maxChunkSize?: number;
+}
 
 export interface SelectInput {
   body: BodySource;
   contentType?: string;
-  accept: { ibb: boolean; chunked: boolean; maxChunkSize?: number };
+  accept: StreamAcceptFlags;
   inlineBudgetBytes: number;
   preferredStreams: readonly StreamMechanism[];
 }
@@ -121,6 +131,15 @@ function selectStream(input: SelectInput): EncodingDecision {
       return {
         mode: "chunkedBase64",
         chunkSize: resolveChunkSize(input.accept.maxChunkSize),
+      };
+    }
+    if (mechanism === "sipub" && input.accept.sipub) {
+      return { mode: "sipub" };
+    }
+    if (mechanism === "jingle" && input.accept.jingle) {
+      return {
+        mode: "jingle",
+        blockSize: resolveChunkSize(input.accept.maxChunkSize),
       };
     }
   }
