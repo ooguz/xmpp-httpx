@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0 — 2026-07-07
+
+- **Content-Encoding**: transparent gzip/deflate via
+  CompressionStream/DecompressionStream (browser-safe). Client advertises
+  `Accept-Encoding` and decompresses responses; server compresses
+  compressible responses (eagerly for byte bodies — a gzipped body often
+  fits inline) and decompresses pre-encoded request bodies, with a
+  post-decompression cap against zip bombs. Disable with `compress: false`
+  on either side.
+- **`stanzaBudgets(maxStanzaBytes)`** derives `inlineBudgetBytes` +
+  `maxChunkSize` from a known server stanza limit; an explicitly advertised
+  `maxChunkSize` is now honored up to the spec maximum (previously capped
+  at 8192).
+- **Authorization policy helpers**: `presencePolicy(session)` (allow
+  currently-available JIDs) and `manualPolicy(prompt, {ttlMs})`
+  (application-approved requesters with per-JID caching).
+- **Origin proxy** forwards the requester's full XMPP-authenticated JID as
+  `X-Httpx-From` (configurable/disable via `jidHeader`) — the httpx
+  replacement for cookies/Basic auth.
+- Documented sessions/reconnection/stream-lifetime semantics and the
+  authentication model in `docs/architecture.md`; connection loss
+  mid-stream is tested to surface as a `timeout` error.
+
 ## 0.5.0 — 2026-07-07
 
 - **sipub transport** (XEP-0137 over XEP-0095 SI, IBB stream method only):
