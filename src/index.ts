@@ -28,8 +28,20 @@ export {
   type XmppSession,
 } from "./session.js";
 
-// Service discovery
-export { advertiseHttpx, DiscoCache, type DiscoSupport } from "./discovery.js";
+// Service discovery + entity capabilities
+export {
+  advertiseHttpx,
+  DEFAULT_IDENTITY,
+  DiscoCache,
+  httpxFeatures,
+  type DiscoSupport,
+} from "./discovery.js";
+export {
+  buildCapsElement,
+  capsVerFromDiscoQuery,
+  computeCapsVer,
+  type CapsIdentity,
+} from "./caps.js";
 
 // Transports
 export {

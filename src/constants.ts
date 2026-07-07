@@ -6,6 +6,8 @@ export const NS_SHIM = "http://jabber.org/protocol/shim";
 export const NS_IBB = "http://jabber.org/protocol/ibb";
 /** XEP-0030: Service Discovery. */
 export const NS_DISCO_INFO = "http://jabber.org/protocol/disco#info";
+/** XEP-0115: Entity Capabilities. */
+export const NS_CAPS = "http://jabber.org/protocol/caps";
 /** RFC 6120 stanza error conditions. */
 export const NS_STANZAS = "urn:ietf:params:xml:ns:xmpp-stanzas";
 

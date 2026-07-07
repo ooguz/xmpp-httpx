@@ -343,5 +343,6 @@ export class HttpxClient {
     this.#closed = true;
     this.#router.release();
     this.#ibb.release();
+    this.#disco.dispose();
   }
 }
