@@ -255,8 +255,68 @@ The full stanza-condition table lives in `src/errors.ts` (`fromXmppError`).
   bare-JID-bound; jingle sessions are keyed by (bare peer, sid).
 - Connection-management headers are stripped by the origin proxy per
   XEP-0332 §9; XMPP has no persistent-connection semantics.
-- Roster-subscription policies (the XEP's "manual"/"provisioned" modes)
-  are the application's business — it owns presence.
+- Policy helpers cover the XEP's modes without the library owning presence:
+  `allowAll`/`allowList` (public/private), `presencePolicy(session)` (allow
+  currently-available JIDs — roster-driven in practice, since availability
+  implies subscription), and `manualPolicy(prompt)` (application-supplied
+  approval with per-JID TTL caching). "Provisioned" (XEP-0324) remains out
+  of scope.
+
+### Authentication
+
+httpx needs no cookies or Basic auth: **the `from` JID is the identity**,
+authenticated by the XMPP server via SASL before any stanza is routed. The
+`authorize` hook receives it; gateways forward it to the origin as the
+`X-Httpx-From` header (full JID; configurable via the origin proxy's
+`jidHeader` option) alongside `X-Forwarded-For` (bare JID) — an origin
+behind the gateway can trust these the way it would trust a reverse proxy's
+auth headers, provided it only accepts them from the gateway. XEP-0348
+("Signing Forms") was evaluated and does not map onto httpx request
+authentication; per-request signatures would need a new profile (see
+[xep-0332-feedback.md](xep-0332-feedback.md)).
+
+### Content-Encoding
+
+Bodies pay a 33% base64 tax, so compression matters more than on plain
+HTTP — a gzipped HTML page routinely turns a multi-stanza chunked stream
+into a single inline `<resp>`. The client advertises
+`Accept-Encoding: gzip, deflate` (disable with `compress: false`) and
+transparently decompresses responses, consuming the `Content-Encoding`
+header; unknown codings (e.g. `br` set by a handler) pass through untouched.
+The server compresses compressible content types when the requester
+advertised support — byte bodies eagerly (and keeps the result only if
+smaller; skipped under 256 bytes), streams lazily — and symmetrically
+decompresses pre-encoded *request* bodies for the handler, with a
+post-decompression size cap against zip bombs. Requests are never
+auto-compressed (the XEP gives no channel to learn the responder's support
+first); callers may pre-compress and set `Content-Encoding` themselves.
+
+## Sessions, reconnection, and stream lifetimes
+
+The library deliberately does not manage connections, so its behavior under
+connection loss follows from the session abstraction:
+
+- **In-flight IQs** (requests, IBB blocks) reject via timeout when the
+  transport dies; `fromXmppError` maps them to `HttpxError("timeout")`.
+- **In-flight streaming bodies** are killed by their idle watchdogs
+  (default 30 s, tunable per client/server via `idleTimeoutMs`) — a dead
+  link mid-chunk-stream surfaces as a `timeout` error on the body stream,
+  never as a silent truncation (tested in `test/integration/abort.test.ts`).
+- **@xmpp/client auto-reconnect** reuses the same entity object, so the
+  per-session singletons (routers, managers) and their registered handlers
+  survive a reconnect; new requests work immediately. Bodies that were
+  mid-flight at the drop are *not* resumed — HTTP semantics offer no way to
+  splice a half-transferred body, so they error and the caller retries.
+- **XEP-0198 stream resumption** is transparent when the XMPP library
+  performs it (same session object, stanzas replayed by the server); a
+  *new* login (new resource) is a new session — construct fresh
+  `HttpxClient`/`HttpxServer` instances for it and `close()`/`stop()` the
+  old ones to release listeners.
+- Budgets can be adapted to a server's real stanza-size limit (the 10 KiB
+  default is only the RFC 6120 floor): spread
+  `stanzaBudgets(maxStanzaBytes)` into client/server options; the limit
+  itself comes from server config or XEP-0478 stream-limits advertisement,
+  which the application reads during connection setup.
 
 ## Configuration reference
 

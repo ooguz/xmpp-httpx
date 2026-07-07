@@ -32,31 +32,30 @@ opened.
 
 Goal: close the remaining spec-adjacent gaps.
 
-- [ ] **Content-Encoding support** (M) — gzip/deflate request+response
-  bodies via `CompressionStream`/`DecompressionStream` (browser-safe);
-  negotiate with `Accept-Encoding`/`Content-Encoding` headers; big win since
-  base64 already costs 33%.
-- [ ] **XEP-0348 (Signing Forms / HTTP over XMPP auth patterns)** (M) —
-  research + implement whatever request-authentication pattern fits httpx
-  gateways; at minimum document JID-based auth as the replacement for
-  cookies/basic-auth.
-- [ ] **SOCKS5 bytestreams** (L) — XEP-0065 as an out-of-band data plane and
-  XEP-0260 (Jingle S5B) as a Jingle transport, with IBB fallback. First
-  transport that beats in-band throughput; Node-only initially (browser has
-  no raw TCP).
-- [ ] **Stanza-size probing** (S) — the 10 KiB floor is conservative; probe
-  the server's real limit (XEP-0478 stream limits when advertised) and
-  raise `inlineBudgetBytes`/chunk size accordingly.
-- [ ] **Roster-policy helpers** (M) — the XEP's "manual" and "provisioned"
-  authorization modes as optional helpers driven by presence-subscription
-  events, without the library owning presence.
-- [ ] **Reconnect resilience** (M) — today a dropped session kills in-flight
-  streams (correct but blunt): document the story, surface a
-  `session-replaced` hook, and test against XEP-0198 resumption (streams
-  survive a resume; must not survive a new session).
+- [x] **Content-Encoding support** (M) — transparent gzip/deflate on both
+  sides via CompressionStream (v0.6.0); requests are not auto-compressed
+  (no negotiation channel — callers may pre-compress).
+- [x] **XEP-0348 / auth patterns** (M) — concluded: JID-based auth is the
+  pattern (SASL-authenticated `from`); origin proxy forwards `X-Httpx-From`;
+  XEP-0348 doesn't map onto httpx requests — documented in
+  [architecture.md](architecture.md) and the XSF feedback draft.
+- [ ] **SOCKS5 bytestreams** (L) — XEP-0065 + XEP-0260 (Jingle S5B) with IBB
+  fallback. Deliberately deferred to its own round: Node-only (no raw TCP in
+  browsers), needs proxy infrastructure for NAT traversal, and XEP-0332 only
+  reaches it through the sipub/jingle negotiation layers.
+- [x] **Stanza-size budgets** (S) — `stanzaBudgets(maxStanzaBytes)` helper
+  (v0.6.0); explicit `maxChunkSize` advertisements now honored to the spec
+  max. Automatic XEP-0478 probing stays with the application, which owns
+  the stream features.
+- [x] **Roster-policy helpers** (M) — `presencePolicy` + `manualPolicy`
+  (v0.6.0); "provisioned" (XEP-0324) remains out of scope.
+- [x] **Reconnect resilience** (M) — semantics documented
+  ([architecture.md](architecture.md) §Sessions), dead-link-mid-stream
+  surfaces as a tested `timeout` error; bodies are never silently truncated.
 
-Acceptance: compressed bodies round-trip in E2E; S5B beats IBB in the
-benchmark (phase 9) on Node; protocol-notes updated per feature.
+Acceptance (met for the shipped items): compressed bodies round-trip with
+wire-level proof (zero chunk stanzas for a 288 KB text body); remaining:
+S5B beats IBB in the phase 9 benchmark on Node.
 
 ## Phase 9 — Hardening & performance
 
