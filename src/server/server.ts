@@ -33,6 +33,14 @@ import {
 import type { HttpMethod, HttpxBodyInit } from "../types.js";
 import { base64Length } from "../util/base64.js";
 import {
+  chooseEncoding,
+  compressStream,
+  decompressStream,
+  isCompressibleContentType,
+  MIN_COMPRESS_BYTES,
+  parseContentEncodings,
+} from "../util/compression.js";
+import {
   bytesFromStream,
   deferredStream,
   iterateStream,
@@ -92,6 +100,12 @@ export interface HttpxServerOptions {
   idleTimeoutMs?: number;
   /** Answer disco#info with the urn:xmpp:http feature. Default true. */
   advertise?: boolean;
+  /**
+   * Compress compressible response bodies when the requester sent
+   * Accept-Encoding, and transparently decompress encoded request bodies.
+   * Default true.
+   */
+  compress?: boolean;
   /** Called with errors from handlers and post-reply body streaming. */
   onError?: (error: unknown, context: { from: string; resource?: string }) => void;
 }
@@ -222,6 +236,20 @@ export class HttpxServer {
       throw err;
     }
 
+    // Transparently undo request-body content codings (the peer may have
+    // pre-compressed). A second limit bounds decompression expansion.
+    if (body && this.#options.compress !== false) {
+      const codings = parseContentEncodings(req.headers.get("content-encoding"));
+      if (codings && codings.length > 0) {
+        body = limitStream(
+          decompressStream(body, codings),
+          this.#options.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES,
+        );
+        req.headers.delete("content-encoding");
+        req.headers.delete("content-length");
+      }
+    }
+
     const request: HttpxServerRequest = {
       from,
       to,
@@ -252,7 +280,10 @@ export class HttpxServer {
           source: { kind: "empty" },
         };
       } else {
-        normalized = await this.#normalizeResult(await handler(request));
+        normalized = await this.#maybeCompress(
+          await this.#normalizeResult(await handler(request)),
+          req.headers,
+        );
       }
     } catch (err) {
       this.#options.onError?.(err, { from, resource: req.resource });
@@ -359,6 +390,54 @@ export class HttpxServer {
       source,
       ...(stream !== undefined ? { stream } : {}),
     };
+  }
+
+  /**
+   * Compresses a compressible response body when the requester advertised
+   * Accept-Encoding. Byte bodies are compressed eagerly — a gzipped body
+   * often fits inline where the raw one needed a stream — and kept only
+   * when actually smaller; streams are wrapped lazily.
+   */
+  async #maybeCompress(
+    normalized: NormalizedResponse,
+    requestHeaders: Headers,
+  ): Promise<NormalizedResponse> {
+    if (this.#options.compress === false) return normalized;
+    if (normalized.headers.has("content-encoding")) return normalized;
+    if (!isCompressibleContentType(normalized.headers.get("content-type"))) {
+      return normalized;
+    }
+    const encoding = chooseEncoding(requestHeaders.get("accept-encoding"));
+    if (!encoding) return normalized;
+
+    if (normalized.source.kind === "bytes") {
+      if (normalized.source.bytes.length < MIN_COMPRESS_BYTES) return normalized;
+      const compressed = await bytesFromStream(
+        compressStream(streamFromBytes(normalized.source.bytes), encoding),
+      );
+      if (compressed.length >= normalized.source.bytes.length) return normalized;
+      const headers = new Headers(normalized.headers);
+      headers.set("content-encoding", encoding);
+      headers.set("content-length", String(compressed.length));
+      headers.append("vary", "accept-encoding");
+      return { ...normalized, headers, source: { kind: "bytes", bytes: compressed } };
+    }
+
+    if (normalized.source.kind === "stream" && normalized.stream) {
+      const headers = new Headers(normalized.headers);
+      headers.set("content-encoding", encoding);
+      headers.delete("content-length"); // length now unknown
+      headers.append("vary", "accept-encoding");
+      return {
+        ...normalized,
+        headers,
+        source: { kind: "stream" },
+        stream: compressStream(normalized.stream, encoding),
+      };
+    }
+
+    // XML element bodies stay uncompressed — they inline as XML.
+    return normalized;
   }
 
   #openRequestBody(

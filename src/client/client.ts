@@ -34,6 +34,10 @@ import {
   streamFromBytes,
   textEncoder,
 } from "../util/bytes.js";
+import {
+  decompressStream,
+  parseContentEncodings,
+} from "../util/compression.js";
 import { HttpxResponse } from "./response.js";
 
 export interface HttpxClientOptions {
@@ -53,6 +57,11 @@ export interface HttpxClientOptions {
   maxBufferedBytes?: number;
   /** Idle timeout for streamed response bodies. */
   idleTimeoutMs?: number;
+  /**
+   * Advertise Accept-Encoding: gzip, deflate (responses are transparently
+   * decompressed either way). Default true.
+   */
+  compress?: boolean;
   /** Explicit sender JID — required when the session is a component. */
   from?: string;
 }
@@ -163,6 +172,9 @@ export class HttpxClient {
     const { source, stream } = normalizeBody(init.body);
     if (typeof init.body === "string" && !headers.has("content-type")) {
       headers.set("content-type", "text/plain; charset=utf-8");
+    }
+    if (this.#options.compress !== false && !headers.has("accept-encoding")) {
+      headers.set("accept-encoding", "gzip, deflate");
     }
 
     const acceptIbb = this.#options.accept?.ibb ?? true;
@@ -282,6 +294,16 @@ export class HttpxClient {
     const resp = decodeResp(respEl);
     const peer = result.attrs["from"] ?? to;
 
+    // Transparently undo known content codings; unknown codings are left
+    // for the caller along with their header.
+    let body = this.#openResponseBody(peer, resp.data, signal);
+    const codings = parseContentEncodings(resp.headers.get("content-encoding"));
+    if (body && codings && codings.length > 0) {
+      body = decompressStream(body, codings);
+      resp.headers.delete("content-encoding");
+      resp.headers.delete("content-length");
+    }
+
     return new HttpxResponse({
       statusCode: resp.statusCode,
       ...(resp.statusMessage !== undefined
@@ -289,7 +311,7 @@ export class HttpxClient {
         : {}),
       version: resp.version,
       headers: resp.headers,
-      body: this.#openResponseBody(peer, resp.data, signal),
+      body,
     });
   }
 
