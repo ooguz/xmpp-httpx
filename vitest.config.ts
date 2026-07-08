@@ -3,11 +3,13 @@ import { playwright } from "@vitest/browser-playwright";
 
 // unit/ and integration/ are browser-safe by design (no Node APIs; fixtures
 // arrive via `?raw` imports). e2e/ needs Node + Docker and only exists when
-// E2E=1 is set.
+// E2E=1 is set. integration-node/ uses raw TCP sockets (SOCKS5 bytestreams)
+// and only ever runs under the "node" project.
 const BROWSER_SAFE = [
   "test/unit/**/*.test.ts",
   "test/integration/**/*.test.ts",
 ];
+const NODE_ONLY = ["test/integration-node/**/*.test.ts"];
 
 export default defineConfig({
   test: {
@@ -17,7 +19,7 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
-          include: BROWSER_SAFE,
+          include: [...BROWSER_SAFE, ...NODE_ONLY],
           benchmark: { include: ["test/bench/**/*.bench.ts"] },
           // Root-level testTimeout is not inherited by project entries.
           testTimeout: 15_000,
