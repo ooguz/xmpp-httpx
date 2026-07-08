@@ -182,6 +182,54 @@ publisher                                   retriever
 Publications are one-shot, bound to the requesting peer's bare JID, and
 expire unclaimed after 60 s.
 
+#### SOCKS5 Bytestreams — XEP-0065 (`src/socks5/protocol.ts`, `src/node/socks5.ts`)
+
+An optional, Node-only stream-method *inside* sipub's SI negotiation —
+invisible at the `DataDescriptor` level (still `{kind: "sipub", id}`); only
+enabled when a `Socks5Adapter` is passed as `socks5` to `HttpxClient`/
+`HttpxServer`. Raw TCP sockets mean this can never run in a browser, so the
+adapter lives behind the `xmpp-httpx/node` subpath export
+(`createSocks5Adapter`) — `src/sipub/sipub.ts` only depends on the universal
+`Socks5Adapter` interface.
+
+Role mapping onto sipub's existing split: publisher = Sender = XEP-0065
+"Requester" (offers streamhost candidates, writes bytes once established,
+sends `<activate>` to a proxy candidate); retriever = Receiver = "Target"
+(tries candidates in order as a SOCKS5 client, replies `streamhost-used`,
+reads bytes). A candidate is either an external SOCKS5 proxy component
+(caller-configured `proxyJid`/`proxyHost`/`proxyPort` — needed for NAT
+traversal) or the publisher itself, self-hosting a streamhost via a local
+`net.Server` (`listen`).
+
+```
+publisher (Requester)                       retriever (Target)
+   │  SI offer: stream-method [bytestreams, ibb]   │
+   │◄————————— accept: chooses bytestreams ————————│  arms IBB expectIncoming
+   │                                                │  AND a bytestreams-query
+   │                                                │  listener, same sid
+   │────— IQ-set <query><streamhost…/></query> ———►│  tries each candidate
+   │◄————————— result <streamhost-used/> ——————————│
+   │ (if proxy) IQ-set <activate> to the proxy      │
+   │═══════════ raw TCP, SOCKS5-framed ════════════►│
+```
+
+**IBB fallback, keyed by the shared sid:** if the candidate query IQ comes
+back as an error (every candidate connection failed) or the local
+connection/activation attempt throws, the publisher catches it and falls
+straight through to the *same* `IbbManager.openOutgoing(to, {sid, ...})`
+call already used for the plain-IBB case. No renegotiation is needed — the
+retriever already armed an `ibb.expectIncoming(from, sid)` in parallel with
+the bytestreams attempt (before replying to the SI offer), so whichever
+transport the publisher actually drives wins the race.
+
+**Deliberately out of scope this round:** XEP-0260 (Jingle SOCKS5
+Bytestreams). It needs real transport candidate negotiation
+(`transport-info`/`candidate-used`/`candidate-error`/`transport-replace`)
+that the current minimal `JingleManager` doesn't support — it skips
+candidate exchange entirely and jumps straight to a single embedded
+session-initiate. Jingle bodies still use IBB only; see
+[ROADMAP.md](ROADMAP.md).
+
 ### jingle — XEP-0166 subset (`src/jingle/jingle.ts`)
 
 The `<jingle action='session-initiate'>` embedded in `<data>` **is** the
@@ -334,11 +382,14 @@ All defaults live in `src/constants.ts`:
 | `DEFAULT_IBB_BLOCK_SIZE` | 4096 | IBB block size |
 | `DEFAULT_IBB_ACCEPT_TIMEOUT_MS` | 5 000 | parked-open/parked-offer window |
 | `DEFAULT_OFFER_TTL_MS` | 60 000 | unclaimed sipub/jingle offer expiry |
+| `DEFAULT_SOCKS5_CONNECT_TIMEOUT_MS` | 10 000 | SOCKS5 candidate connect attempt |
 
 `HttpxClientOptions`: `defaultTimeoutMs`, `maxChunkSize`, `accept: { ibb?,
 sipub?, jingle? }` (all default true), `discover` (true), `inlineBudgetBytes`,
 `preferredStreams`, `maxBufferedBytes`, `idleTimeoutMs`, `from` (required for
-components).
+components), `socks5` (Node-only, see `createSocks5Adapter` in
+`xmpp-httpx/node`).
 
 `HttpxServerOptions`: `authorize`, `inlineBudgetBytes`, `preferredStreams`,
-`maxRequestBodyBytes`, `idleTimeoutMs`, `advertise` (true), `onError`.
+`maxRequestBodyBytes`, `idleTimeoutMs`, `advertise` (true), `onError`,
+`socks5` (same as above).

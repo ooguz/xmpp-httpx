@@ -39,10 +39,18 @@ Goal: close the remaining spec-adjacent gaps.
   pattern (SASL-authenticated `from`); origin proxy forwards `X-Httpx-From`;
   XEP-0348 doesn't map onto httpx requests — documented in
   [architecture.md](architecture.md) and the XSF feedback draft.
-- [ ] **SOCKS5 bytestreams** (L) — XEP-0065 + XEP-0260 (Jingle S5B) with IBB
-  fallback. Deliberately deferred to its own round: Node-only (no raw TCP in
-  browsers), needs proxy infrastructure for NAT traversal, and XEP-0332 only
-  reaches it through the sipub/jingle negotiation layers.
+- [x] **SOCKS5 bytestreams** (L) — XEP-0065 as a `sipub`/XEP-0095 SI
+  stream-method alongside IBB, Node-only (`createSocks5Adapter` in
+  `xmpp-httpx/node`): external-proxy and self-hosted-direct-streamhost
+  candidates, automatic IBB fallback on the same sid when every candidate
+  is unreachable. Details in [architecture.md](architecture.md) §SOCKS5
+  Bytestreams.
+- [ ] **Jingle S5B — XEP-0260** (L) — deliberately deferred out of the SOCKS5
+  bytestreams work above: needs real transport candidate negotiation
+  (`transport-info`/`candidate-used`/`candidate-error`/`transport-replace`)
+  that the current minimal `JingleManager` doesn't support at all (it skips
+  candidate exchange entirely and jumps straight to a single embedded
+  session-initiate over IBB). A separate, substantially larger round.
 - [x] **Stanza-size budgets** (S) — `stanzaBudgets(maxStanzaBytes)` helper
   (v0.6.0); explicit `maxChunkSize` advertisements now honored to the spec
   max. Automatic XEP-0478 probing stays with the application, which owns
@@ -54,8 +62,9 @@ Goal: close the remaining spec-adjacent gaps.
   surfaces as a tested `timeout` error; bodies are never silently truncated.
 
 Acceptance (met for the shipped items): compressed bodies round-trip with
-wire-level proof (zero chunk stanzas for a 288 KB text body); remaining:
-S5B beats IBB in the phase 9 benchmark on Node.
+wire-level proof (zero chunk stanzas for a 288 KB text body); the sipub/S5B
+transport now exists, so the phase 9 throughput benchmark comparing it
+against IBB on Node is unblocked but still not run.
 
 ## Phase 9 — Hardening & performance
 
@@ -70,9 +79,10 @@ Goal: trust the implementation under adversarial and heavy load.
   (`test/integration/adversarial.test.ts`; drove the IBB idle-timeout fix).
 - [x] **Throughput benchmarks** (M) — bytes/sec per transport (inline vs
   chunked vs IBB) over the mock pair; `npm run bench`, tracked in CI as an
-  informational `workflow_dispatch` job. S5B is out of scope until the
-  Phase 8 SOCKS5-bytestreams transport itself is built; no Prosody-side
-  benchmark yet (mock-pair numbers are comparative, not wire-clocked).
+  informational `workflow_dispatch` job. S5B now exists (sipub/XEP-0065, see
+  Phase 8) but isn't in `npm run bench` yet — it needs real TCP sockets, not
+  the mock pair; no Prosody-side benchmark yet either (mock-pair numbers are
+  comparative, not wire-clocked).
 - [x] **Memory audit** (S) — `scripts/memcheck.mjs` streams 1 MiB and 16 MiB
   IBB bodies and samples live (post-GC) heap; fails if retention scales
   with body size. Verified locally: 0.00x heap ratio for a 16x larger body.
