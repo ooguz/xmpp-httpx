@@ -5,6 +5,7 @@ import {
   DEFAULT_IBB_BLOCK_SIZE,
   DEFAULT_IDLE_TIMEOUT_MS,
   DEFAULT_OFFER_TTL_MS,
+  NS_BYTESTREAMS,
   NS_FEATURE_NEG,
   NS_IBB,
   NS_SI,
@@ -21,6 +22,7 @@ import {
   type IqContext,
   type XmppSession,
 } from "../session.js";
+import type { Socks5Adapter, StreamhostCandidate } from "../socks5/protocol.js";
 import type { BodyOffer, BodyTransport } from "../transport/registry.js";
 import type { StreamAcceptFlags } from "../transport/select.js";
 import { deferredStream, iterateStream } from "../util/bytes.js";
@@ -83,14 +85,20 @@ function iqError(
   );
 }
 
+interface Socks5Expectation {
+  resolve: (stream: ReadableStream<Uint8Array>) => void;
+}
+
 export class SipubManager {
   static #instances = new WeakMap<object, SipubManager>();
 
-  static acquire(session: XmppSession): SipubManager {
+  static acquire(session: XmppSession, socks5?: Socks5Adapter): SipubManager {
     let manager = SipubManager.#instances.get(session);
     if (!manager) {
-      manager = new SipubManager(session);
+      manager = new SipubManager(session, socks5);
       SipubManager.#instances.set(session, manager);
+    } else if (socks5 && !manager.#socks5) {
+      manager.#socks5 = socks5;
     }
     manager.#refs++;
     manager.#ensureStarted();
@@ -99,18 +107,21 @@ export class SipubManager {
 
   readonly #session: XmppSession;
   readonly #ibb: IbbManager;
+  #socks5: Socks5Adapter | undefined;
   #refs = 0;
   #handlersRegistered = false;
   #publications = new Map<string, PublicationState>();
   #expectedOffers = new Map<string, OfferExpectation>();
   #parkedOffers = new Map<string, ParkedOffer>();
+  #s5Expectations = new Map<string, Socks5Expectation>();
 
   acceptTimeoutMs = DEFAULT_IBB_ACCEPT_TIMEOUT_MS;
   idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
 
-  private constructor(session: XmppSession) {
+  private constructor(session: XmppSession, socks5: Socks5Adapter | undefined) {
     this.#session = session;
     this.#ibb = IbbManager.acquire(session);
+    this.#socks5 = socks5;
   }
 
   release(): void {
@@ -126,6 +137,8 @@ export class SipubManager {
       expectation.reject(new HttpxError("aborted", "sipub manager closed"));
     }
     this.#expectedOffers.clear();
+    this.#s5Expectations.clear();
+    this.#socks5?.release();
     this.#ibb.release();
   }
 
@@ -210,6 +223,7 @@ export class SipubManager {
     publication: PublicationState,
   ): Promise<void> {
     const { body } = publication;
+    const methods = this.#socks5 ? [NS_BYTESTREAMS, NS_IBB] : [NS_IBB];
     const siAttrs: Record<string, string> = {
       xmlns: NS_SI,
       id: sid,
@@ -233,7 +247,7 @@ export class SipubManager {
           xml(
             "field",
             { var: "stream-method", type: "list-single" },
-            xml("option", null, xml("value", null, NS_IBB)),
+            ...methods.map((method) => xml("option", null, xml("value", null, method))),
           ),
         ),
       ),
@@ -262,7 +276,18 @@ export class SipubManager {
       ?.getChildren("field")
       .find((f) => f.attrs["var"] === "stream-method")
       ?.getChildText("value");
-    if (chosen !== NS_IBB) {
+
+    if (chosen === NS_BYTESTREAMS && this.#socks5) {
+      const requesterJid = body.from ?? ourJid ?? this.#session.jid?.toString() ?? "";
+      try {
+        await this.#runBytestreamsTransfer(to, requesterJid, sid, body, this.#socks5);
+        return;
+      } catch {
+        // S5B failed end-to-end (no reachable candidate, proxy activation
+        // failed, …) — fall through to plain IBB on the SAME sid. The
+        // retriever already has an expectIncoming() armed for exactly this.
+      }
+    } else if (chosen !== NS_IBB) {
       throw new HttpxError(
         "protocol-error",
         `sipub retriever chose unsupported stream method "${chosen ?? ""}"`,
@@ -281,6 +306,76 @@ export class SipubManager {
     if (explicitFrom !== undefined) openOptions.from = explicitFrom;
 
     const out = await this.#ibb.openOutgoing(to, openOptions);
+    await this.#writeBody(out, body);
+  }
+
+  /** Publisher side of XEP-0065: offer candidates, await streamhost-used,
+   * establish the write end (activating a proxy candidate if needed). */
+  async #runBytestreamsTransfer(
+    to: string,
+    requesterJid: string,
+    sid: string,
+    body: BodyOffer,
+    socks5: Socks5Adapter,
+  ): Promise<void> {
+    const candidates = await socks5.candidatesFor(sid, {
+      requesterJid,
+      targetJid: to,
+    });
+    if (candidates.length === 0) {
+      throw new HttpxError(
+        "unavailable",
+        "no socks5 streamhost candidates available",
+      );
+    }
+
+    const query = xml(
+      "query",
+      { xmlns: NS_BYTESTREAMS, sid, mode: "tcp" },
+      ...candidates.map((c) =>
+        xml("streamhost", { jid: c.jid, host: c.host, port: String(c.port) }),
+      ),
+    );
+    const iqAttrs: Record<string, string> =
+      requesterJid !== ""
+        ? { type: "set", to, from: requesterJid }
+        : { type: "set", to };
+    let reply: Element;
+    try {
+      reply = await this.#session.iqCaller.request(
+        xml("iq", iqAttrs, query),
+        this.idleTimeoutMs,
+      );
+    } catch (err) {
+      throw fromXmppError(err);
+    }
+
+    const usedJid = reply
+      .getChild("query", NS_BYTESTREAMS)
+      ?.getChild("streamhost-used")?.attrs["jid"];
+    if (!usedJid) {
+      throw new HttpxError(
+        "protocol-error",
+        "socks5 bytestreams reply without streamhost-used",
+      );
+    }
+
+    const out = await socks5.openOutgoing(sid, usedJid, {
+      requesterJid,
+      targetJid: to,
+      candidates,
+    });
+    await this.#writeBody(out, body);
+  }
+
+  async #writeBody(
+    out: {
+      write(bytes: Uint8Array): Promise<void>;
+      close(): Promise<void>;
+      abort(reason: Error): Promise<void>;
+    },
+    body: BodyOffer,
+  ): Promise<void> {
     try {
       const stream = await body.open();
       for await (const part of iterateStream(stream)) {
@@ -385,7 +480,8 @@ export class SipubManager {
     });
   }
 
-  /** Validates the offer, arms IBB, and builds the accepting result. */
+  /** Validates the offer, arms IBB (and bytestreams, if chosen), and builds
+   * the accepting result. */
   #acceptOffer(
     ctx: IqContext,
     sid: string,
@@ -400,7 +496,9 @@ export class SipubManager {
         ?.getChildren("option")
         .map((o) => o.getChildText("value")) ?? [];
 
-    if (!offeredMethods.includes(NS_IBB)) {
+    const useBytestreams =
+      this.#socks5 !== undefined && offeredMethods.includes(NS_BYTESTREAMS);
+    if (!useBytestreams && !offeredMethods.includes(NS_IBB)) {
       return {
         reply: iqError(
           "cancel",
@@ -408,19 +506,52 @@ export class SipubManager {
           xml("no-valid-streams", { xmlns: NS_SI }),
         ),
         stream: Promise.reject(
-          new HttpxError("not-implemented", "sipub offer without IBB method"),
+          new HttpxError(
+            "not-implemented",
+            "sipub offer without a supported stream method",
+          ),
         ),
       };
     }
 
     // Arm the IBB expectation BEFORE the accepting reply goes out.
-    const stream = this.#ibb
-      .expectIncoming(from, sid, { timeoutMs: this.idleTimeoutMs })
-      .then((incoming) => incoming.readable);
+    let stream: Promise<ReadableStream<Uint8Array>>;
+    if (useBytestreams) {
+      const key = this.#key(from, sid);
+      stream = new Promise<ReadableStream<Uint8Array>>((resolve, reject) => {
+        let settled = false;
+        this.#s5Expectations.set(key, {
+          resolve: (readable) => {
+            if (settled) return;
+            settled = true;
+            resolve(readable);
+          },
+        });
+        this.#ibb
+          .expectIncoming(from, sid, { timeoutMs: this.idleTimeoutMs })
+          .then((incoming) => {
+            this.#s5Expectations.delete(key);
+            if (settled) return;
+            settled = true;
+            resolve(incoming.readable);
+          })
+          .catch((err: unknown) => {
+            this.#s5Expectations.delete(key);
+            if (settled) return;
+            settled = true;
+            reject(err instanceof Error ? err : new Error(String(err)));
+          });
+      });
+    } else {
+      stream = this.#ibb
+        .expectIncoming(from, sid, { timeoutMs: this.idleTimeoutMs })
+        .then((incoming) => incoming.readable);
+    }
     // The rejection is consumed by the retriever; avoid unhandled noise if
     // the offer was parked-and-expired instead.
     stream.catch(() => {});
 
+    const chosenMethod = useBytestreams ? NS_BYTESTREAMS : NS_IBB;
     const reply = xml(
       "si",
       { xmlns: NS_SI },
@@ -433,7 +564,7 @@ export class SipubManager {
           xml(
             "field",
             { var: "stream-method" },
-            xml("value", null, NS_IBB),
+            xml("value", null, chosenMethod),
           ),
         ),
       ),
@@ -441,11 +572,61 @@ export class SipubManager {
     return { reply, stream };
   }
 
+  /** Retriever side of XEP-0065: try the offered candidates and reply
+   * streamhost-used, or hand back to the armed IBB fallback on failure. */
+  #onBytestreamsQuery(
+    ctx: IqContext,
+  ): Element | boolean | Promise<Element | boolean> {
+    const from = ctx.from?.toString();
+    const sid = ctx.element.attrs["sid"];
+    if (!from || !sid) return iqError("modify", "bad-request");
+
+    const socks5 = this.#socks5;
+    if (!socks5) return iqError("cancel", "service-unavailable");
+
+    const key = this.#key(from, sid);
+    const expectation = this.#s5Expectations.get(key);
+    if (!expectation) return iqError("cancel", "item-not-found");
+
+    const candidates: StreamhostCandidate[] = ctx.element
+      .getChildren("streamhost")
+      .map((sh) => ({
+        jid: sh.attrs["jid"] ?? "",
+        host: sh.attrs["host"] ?? "",
+        port: Number(sh.attrs["port"]),
+      }))
+      .filter((c) => c.jid !== "" && c.host !== "" && Number.isInteger(c.port));
+    if (candidates.length === 0) return iqError("modify", "bad-request");
+
+    const targetJid = ctx.to?.toString() ?? this.#session.jid?.toString() ?? "";
+
+    return socks5
+      .connect(sid, candidates, { requesterJid: from, targetJid })
+      .then((result): Element | boolean => {
+        this.#s5Expectations.delete(key);
+        expectation.resolve(result.readable);
+        return xml(
+          "query",
+          { xmlns: NS_BYTESTREAMS, sid },
+          xml("streamhost-used", { jid: result.usedJid }),
+        );
+      })
+      .catch((): Element | boolean => {
+        // Leave the IBB expectIncoming() armed — the publisher falls back
+        // to it on this same sid.
+        this.#s5Expectations.delete(key);
+        return iqError("cancel", "item-not-found");
+      });
+  }
+
   #ensureStarted(): void {
     if (this.#handlersRegistered) return;
     this.#handlersRegistered = true;
     this.#session.iqCallee.get(NS_SIPUB, "start", (ctx) => this.#onStart(ctx));
     this.#session.iqCallee.set(NS_SI, "si", (ctx) => this.#onSiOffer(ctx));
+    this.#session.iqCallee.set(NS_BYTESTREAMS, "query", (ctx) =>
+      this.#onBytestreamsQuery(ctx),
+    );
   }
 
   #key(peer: string, sid: string): string {
@@ -458,8 +639,8 @@ export class SipubTransport implements BodyTransport {
   readonly kind = "sipub";
   readonly #manager: SipubManager;
 
-  constructor(session: XmppSession) {
-    this.#manager = SipubManager.acquire(session);
+  constructor(session: XmppSession, socks5?: Socks5Adapter) {
+    this.#manager = SipubManager.acquire(session, socks5);
   }
 
   accepts(accept: StreamAcceptFlags): boolean {

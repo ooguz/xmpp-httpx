@@ -16,6 +16,7 @@ import { HttpxError } from "../errors.js";
 import { IbbManager } from "../ibb/ibb.js";
 import type { IqContext, XmppSession } from "../session.js";
 import { generateId } from "../session.js";
+import type { Socks5Adapter } from "../socks5/protocol.js";
 import {
   ChunkedSender,
   ChunkReassembler,
@@ -108,6 +109,11 @@ export interface HttpxServerOptions {
   compress?: boolean;
   /** Called with errors from handlers and post-reply body streaming. */
   onError?: (error: unknown, context: { from: string; resource?: string }) => void;
+  /**
+   * Enables XEP-0065 SOCKS5 Bytestreams as a sipub stream-method alongside
+   * IBB (Node-only — see xmpp-httpx/node's createSocks5Adapter).
+   */
+  socks5?: Socks5Adapter;
 }
 
 const DEFAULT_STATUS_MESSAGES: Record<number, string> = {
@@ -159,7 +165,10 @@ export class HttpxServer {
     this.#started = true;
     this.#router = ChunkRouter.acquire(this.#session);
     this.#ibb = IbbManager.acquire(this.#session);
-    this.#registry = createDefaultRegistry(this.#session);
+    this.#registry = createDefaultRegistry(
+      this.#session,
+      this.#options.socks5 !== undefined ? { socks5: this.#options.socks5 } : undefined,
+    );
     this.#session.iqCallee.set(NS_HTTPX, "req", (ctx) => this.#onReq(ctx));
     if (this.#options.advertise !== false) {
       advertiseHttpx(this.#session);

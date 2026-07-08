@@ -14,6 +14,7 @@ import { DiscoCache } from "../discovery.js";
 import { CodecError, fromXmppError, HttpxError } from "../errors.js";
 import { IbbManager } from "../ibb/ibb.js";
 import { generateId, type XmppSession } from "../session.js";
+import type { Socks5Adapter } from "../socks5/protocol.js";
 import {
   ChunkedSender,
   ChunkReassembler,
@@ -64,6 +65,11 @@ export interface HttpxClientOptions {
   compress?: boolean;
   /** Explicit sender JID — required when the session is a component. */
   from?: string;
+  /**
+   * Enables XEP-0065 SOCKS5 Bytestreams as a sipub stream-method alongside
+   * IBB (Node-only — see xmpp-httpx/node's createSocks5Adapter).
+   */
+  socks5?: Socks5Adapter;
 }
 
 interface NormalizedBody {
@@ -146,7 +152,10 @@ export class HttpxClient {
     this.#options = options;
     this.#router = ChunkRouter.acquire(session);
     this.#ibb = IbbManager.acquire(session);
-    this.#registry = createDefaultRegistry(session);
+    this.#registry = createDefaultRegistry(
+      session,
+      options.socks5 !== undefined ? { socks5: options.socks5 } : undefined,
+    );
     this.#disco = new DiscoCache(session);
   }
 

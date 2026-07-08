@@ -73,6 +73,10 @@ export { createDefaultRegistry } from "./transport/default-registry.js";
 export { IbbManager, type IbbInStream, type IbbOutStream } from "./ibb/ibb.js";
 export * from "./sipub/index.js";
 export * from "./jingle/index.js";
+export {
+  type Socks5Adapter,
+  type StreamhostCandidate,
+} from "./socks5/protocol.js";
 
 // Client and server
 export * from "./client/index.js";
