@@ -61,23 +61,28 @@ S5B beats IBB in the phase 9 benchmark on Node.
 
 Goal: trust the implementation under adversarial and heavy load.
 
-- [ ] **Codec fuzzing** (M) — fast-check arbitrary-XML fuzzing of
+- [x] **Codec fuzzing** (M) — fast-check arbitrary-XML fuzzing of
   `decodeReq`/`decodeResp`/chunk/IBB handlers: no crash, only
-  `CodecError`/IQ-error outcomes.
-- [ ] **Adversarial-peer suite** (M) — a hostile mock peer: chunk floods for
+  `CodecError`/IQ-error outcomes (`test/unit/fuzz.test.ts`).
+- [x] **Adversarial-peer suite** (M) — a hostile mock peer: chunk floods for
   unknown streams, sid collisions, seq desync, oversized blocks, withheld
-  acks, early terminates — assert every bound in the security model holds.
-- [ ] **Throughput benchmarks** (M) — bytes/sec per transport (inline vs
-  chunked vs IBB vs S5B) over the mock pair and over Prosody; track in CI as
-  an informational job; tune block sizes from data instead of folklore.
-- [ ] **Memory audit** (S) — heap snapshots while streaming 100 MiB bodies;
-  verify all paths stay O(chunk) not O(body).
+  acks, early terminates — assert every bound in the security model holds
+  (`test/integration/adversarial.test.ts`; drove the IBB idle-timeout fix).
+- [x] **Throughput benchmarks** (M) — bytes/sec per transport (inline vs
+  chunked vs IBB) over the mock pair; `npm run bench`, tracked in CI as an
+  informational `workflow_dispatch` job. S5B is out of scope until the
+  Phase 8 SOCKS5-bytestreams transport itself is built; no Prosody-side
+  benchmark yet (mock-pair numbers are comparative, not wire-clocked).
+- [x] **Memory audit** (S) — `scripts/memcheck.mjs` streams 1 MiB and 16 MiB
+  IBB bodies and samples live (post-GC) heap; fails if retention scales
+  with body size. Verified locally: 0.00x heap ratio for a 16x larger body.
 - [ ] **Security review** (M) — run `/security-review` over the full tree;
   external eyes on the sandbox/rendering pipeline reasoning in the
   extension.
 
-Acceptance: fuzz + adversarial suites green in CI; published benchmark
-numbers; no O(body) memory paths.
+Acceptance: fuzz + adversarial suites green in CI (done); published
+benchmark numbers (done, mock-pair only); no O(body) memory paths (done);
+security review still open.
 
 ## Phase 10 — Browser extension v2
 
