@@ -67,6 +67,10 @@ export default defineConfig({
                 globalSetup: "./test/e2e/global-setup.ts",
                 testTimeout: 60_000,
                 hookTimeout: 180_000,
+                // One Prosody, and a component domain admits exactly one
+                // connection: two suites binding httpx.localhost at once get
+                // "conflict — Component already connected". Sequential files.
+                fileParallelism: false,
               },
             },
           ]

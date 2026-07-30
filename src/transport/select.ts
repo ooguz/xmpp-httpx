@@ -16,6 +16,18 @@ export type BodySource =
 
 export type StreamMechanism = "ibb" | "chunkedBase64" | "sipub" | "jingle";
 
+const STREAM_MECHANISMS: readonly StreamMechanism[] = [
+  "ibb",
+  "chunkedBase64",
+  "sipub",
+  "jingle",
+];
+
+/** Narrows user-supplied strings (CLI flags, config files) to a mechanism. */
+export function isStreamMechanism(value: string): value is StreamMechanism {
+  return (STREAM_MECHANISMS as readonly string[]).includes(value);
+}
+
 export type EncodingDecision =
   | { mode: "none" }
   | { mode: "text"; text: string }

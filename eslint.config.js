@@ -33,7 +33,8 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/node/**"],
+    // src/node/** and src/cli/** are Node-only by design (sockets, argv, fs).
+    ignores: ["src/node/**", "src/cli/**"],
     rules: {
       "no-restricted-globals": ["error", ...PLATFORM_SPECIFIC_GLOBALS],
     },

@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-Library: no API changes. Packaging/tooling fixes only —
+- **Gateway CLI**: `xmpp-httpx-gateway`, shipped as a `bin` of this package.
+  Fronts an HTTP origin over XMPP in component or client mode, with a JSON
+  config file, explicit `--allow`/`--allow-all` authorization (start is refused
+  without one), stanza budgets, stream preference, request logging and clean
+  signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
+  See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **`isStreamMechanism(value)`** exported — the guard the CLI needs to validate
+  `--prefer`, useful to anyone else narrowing user input to a mechanism.
+
+Packaging/tooling fixes —
 
 - **`npm run build` and `npm run lint` were broken** and would have failed CI:
   `tsconfig.build.json` never saw the Node types `src/node/socks5.ts` needs

@@ -15,9 +15,13 @@
     "node": ">=20.10.0"
   },
   "files": [
+    "bin",
     "dist",
     "src"
   ],
+  "bin": {
+    "xmpp-httpx-gateway": "bin/xmpp-httpx-gateway.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

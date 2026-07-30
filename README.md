@@ -15,7 +15,8 @@ XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implemen
 | [docs/architecture.md](docs/architecture.md) | Design rules, module map, request lifecycle, all seven transports, error & security models, configuration reference |
 | [docs/protocol-notes.md](docs/protocol-notes.md) | Every decision made where the spec is ambiguous — the interop anchor |
 | [docs/testing.md](docs/testing.md) | The three vitest projects, mock-session harness, Prosody E2E, CI |
-| [docs/browser-extension.md](docs/browser-extension.md) | WebExtension architecture: connection placement, rendering pipeline, manifest strategy |
+| [docs/browser-extension.md](docs/browser-extension.md) | WebExtension architecture: connection placement, rendering pipeline, tabs, manifest strategy |
+| [docs/gateway-cli.md](docs/gateway-cli.md) | `xmpp-httpx-gateway`: put an existing HTTP origin on XMPP |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Next phases and tasks (release, hardening, extension v2, gateway product) |
 | [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | Implementation-experience write-up for the XSF standards process |
 | [docs/interop.md](docs/interop.md) | Interoperability matrix — tested servers, runtimes, peer implementations |
@@ -102,6 +103,26 @@ server.handle(createOriginProxyHandler("http://localhost:8080"));
 server.start();
 ```
 
+## Gateway CLI
+
+Put an existing website on XMPP without writing any code:
+
+```sh
+XMPP_HTTPX_SECRET=… npx xmpp-httpx-gateway \
+  --origin http://localhost:8080 \
+  --service xmpp://xmpp.example.org:5347 \
+  --domain web.example.org \
+  --allow alice@example.org
+```
+
+That serves `httpx://web.example.org/…` from your HTTP origin, forwarding each
+requester's SASL-authenticated JID as `X-Httpx-From`. Client-account mode
+(`--jid`/`--password`) needs no server-side configuration at all. Authorization
+is never implicit: `--allow <jid>` or `--allow-all`, or the gateway refuses to
+start. Everything can live in a JSON config file (`--config`), with
+flags > environment > file precedence. See
+[docs/gateway-cli.md](docs/gateway-cli.md).
+
 ## Development
 
 ```sh
@@ -115,13 +136,15 @@ The integration suite runs both endpoints against an in-memory stanza router (`t
 
 ## The browser
 
-[`examples/webext/`](examples/webext/) is a working **WebExtension for Firefox and Chromium** that navigates `httpx://` URLs with this library: an extension-page browser chrome (address bar, history), an omnibox keyword (`httpx server@example.org/page` ⏎), clickable `ext+httpx://` links on Firefox, and a sanitized rendering pipeline (DOMPurify → blob-URL subresources → script-less sandboxed iframe). See its README for the build/run instructions and `scripts/demo-gateway.mjs` for a demo site to browse.
+[`examples/webext/`](examples/webext/) is a working **WebExtension for Firefox and Chromium** that navigates `httpx://` URLs with this library: tabs with per-tab history, an address bar, a history/bookmarks drawer, an omnibox keyword (`httpx server@example.org/page` ⏎), clickable `ext+httpx://` links on Firefox, and a sanitized rendering pipeline (DOMPurify + a CSSOM CSS sanitizer → blob-URL subresources → script-less sandboxed iframe) with forms, downloads, page titles/favicons and an HTTP cache doing real 304 revalidation. See its README for build/run instructions, `scripts/demo-gateway.mjs` for a demo site to browse, and `npm run smoke` to drive the whole thing in real Chromium.
 
 ## Roadmap
 
-- XEP-0348 (signing HTTP requests over XMPP), roster-driven authorization policies
-- Content-Encoding negotiation (compressed bodies), EXI
-- Extension polish: styles (sanitized CSS subset), history UI, multiple tabs
+- Gateway as a product: Docker image, observability, static-site mode, rate limiting
+- Jingle S5B (XEP-0260) transport candidate negotiation
+- Beyond the extension: an Electron shell with a real `httpx://` address bar
+
+Full detail, including what is already done, in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

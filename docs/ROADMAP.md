@@ -6,8 +6,9 @@ entity caps, SOCKS5 bytestreams, Content-Encoding, a Prosody E2E suite,
 browser-mode CI, and the Firefox/Chromium WebExtension browser
 (`examples/webext/`) — which now renders page CSS, submits forms, caches with
 real 304 revalidation, saves downloads, and shows page titles and favicons.
-Phases 1–6 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9 are
-done bar Jingle S5B. Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
+Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
+are done bar Jingle S5B; phase 11 has started with the gateway CLI
+(`xmpp-httpx-gateway`). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 
 ## Phase 7 — Release & ecosystem
@@ -196,10 +197,18 @@ Store zips build; signing needs publisher credentials.
 Goal: `createOriginProxyHandler` is one line away from being a deployable
 "put your website on XMPP" daemon.
 
-- [ ] **CLI** (M) — `npx xmpp-httpx-gateway --service xmpp://… --domain
-  web.example.org --secret … --origin http://localhost:8080` with a config
-  file (JID allowlists, budgets, transport prefs); ships as a `bin` in a
-  small separate package or `xmpp-httpx/cli`.
+- [x] **CLI** (M) — `xmpp-httpx-gateway`, a `bin` of the main package (no second
+  package to publish): component (`--domain`/`--secret`) and client
+  (`--jid`/`--password`) modes, JSON config file with
+  flags > env > file > defaults precedence, `--allow`/`--allow-all` (start is
+  *refused* without one — no implicit public gateway), `--max-stanza` budgets,
+  `--prefer` stream order, `--max-body`, `--jid-header`/`--no-jid-header`,
+  `--no-compress`, `--follow-redirects`, per-request logging and clean
+  SIGINT/SIGTERM shutdown. Secrets are read from `XMPP_HTTPX_SECRET`/
+  `XMPP_HTTPX_PASSWORD`, and passing them in argv warns (visible in `ps`).
+  Config parsing is pure and unit-tested; the whole path is covered against
+  Prosody in `test/e2e/cli-gateway.e2e.test.ts`. Guide:
+  [gateway-cli.md](gateway-cli.md).
 - [ ] **Docker image** (S) — the CLI containerized; compose example pairing
   it with Prosody.
 - [ ] **Observability** (M) — structured logs, request counters/latency
@@ -209,8 +218,8 @@ Goal: `createOriginProxyHandler` is one line away from being a deployable
 - [ ] **Rate limiting** (S) — token bucket per bare JID in front of
   `authorize`.
 
-Acceptance: `docker run … xmpp-httpx-gateway` fronts a real site; metrics
-scrapeable; README quickstart under five minutes.
+Acceptance: partly met — the CLI fronts a real site today (README quickstart is
+four commands); the Docker image and scrapeable metrics are the open items.
 
 ## Phase 12 — Beyond the WebExtension
 

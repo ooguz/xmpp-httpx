@@ -43,6 +43,9 @@ together.
   recomputation.
 - `urls.test.ts`, `errors.test.ts` — URL codec incl. browser-style relative
   resolution; stanza-condition mapping.
+- `cli-config.test.ts` — the gateway CLI's config layer, which is pure on
+  purpose: mode validation, the refusal to start without an authorization
+  decision, byte/mechanism parsing, and flags > env > file precedence.
 
 ## Integration harness (`test/integration/mock-session.ts`)
 
@@ -95,7 +98,14 @@ resources because one session supports one `HttpxServer`) and
 `component-gateway.e2e.test.ts` (`httpxFetch` → XEP-0114 component serving
 `demo-site.ts`: pages, an image, a 404, a GET form query, a urlencoded POST
 body with non-ASCII text, an attachment, and an `If-None-Match` → **304**
-round trip — the whole surface the WebExtension drives).
+round trip — the whole surface the WebExtension drives), plus
+`cli-gateway.e2e.test.ts` (the gateway CLI in front of a real HTTP origin:
+status pass-through, `X-Httpx-From`, a proxied POST body, and an unlisted JID
+refused *before* the origin is contacted).
+
+E2E files run **sequentially** (`fileParallelism: false`): they share one
+Prosody, and a component domain admits exactly one connection — two suites
+binding `httpx.localhost` at once get `conflict — Component already connected`.
 
 ## Browser-only suites (`test/browser/`)
 

@@ -62,6 +62,7 @@ export {
   type EncodingDecision,
   type SelectInput,
   type StreamAcceptFlags,
+  isStreamMechanism,
   type StreamMechanism,
 } from "./transport/select.js";
 export {
