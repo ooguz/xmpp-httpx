@@ -108,8 +108,12 @@ Goal: from demo to daily-drivable.
   §CSS.
 - [ ] **Progressive rendering** (M) — render HTML as it streams (the body is
   already a stream; today the extension buffers `text()` first).
-- [ ] **Forms** (M) — GET/`application/x-www-form-urlencoded` POST forms
-  (currently stripped); DOMPurify config + submit interception.
+- [x] **Forms** (M) — GET and `application/x-www-form-urlencoded` POST forms
+  (`examples/webext/src/forms.ts`). Submission is driven from control clicks
+  and Enter-key implicit submission, *not* a `submit` listener: the sandbox has
+  no `allow-forms` and Chromium checks that flag before dispatching the event,
+  so widening the sandbox was the only alternative — declined. Uploads,
+  multipart, and non-httpx actions are refused with an explanation.
 - [ ] **Caching** (M) — Cache API keyed by httpx URL honoring
   `Cache-Control`/`ETag`, with `If-None-Match` revalidation → real 304 flow
   end-to-end.
@@ -127,6 +131,11 @@ Goal: from demo to daily-drivable.
 - [ ] **`web+httpx` site handler research** (S) — a small companion website
   calling `registerProtocolHandler("web+httpx", …)` so links work even
   without protocol_handlers support.
+
+The demo site (`test/e2e/demo-site.ts`, served by `scripts/demo-gateway.mjs`)
+now exercises the shipped surface: a `<style>` block with a CSS background
+fetched over XMPP, a favicon, GET and POST forms, and an attachment download —
+covered end-to-end against Prosody in the component-gateway E2E suite.
 
 Acceptance: browse the demo site with styles, forms, history, and cache
 hits; installable signed artifacts.

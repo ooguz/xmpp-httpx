@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import type {
+  FormRefusal,
+  FormSubmission,
+} from "../../examples/webext/src/forms.js";
 import {
   renderError,
   renderHtml,
@@ -22,6 +26,10 @@ interface Harness {
   iframe: HTMLIFrameElement;
   fetched: string[];
   navigations: string[];
+  submissions: {
+    submission: FormSubmission | null;
+    reason: FormRefusal | null;
+  }[];
 }
 
 /** Renders `html` into a real same-origin iframe and returns what happened. */
@@ -37,6 +45,7 @@ async function render(
 
   const fetched: string[] = [];
   const navigations: string[] = [];
+  const submissions: Harness["submissions"] = [];
   const available = options.available ?? (() => true);
 
   const cleanup = await renderHtml(html, BASE, {
@@ -47,21 +56,22 @@ async function render(
       return PNG;
     },
     onNavigate: (url) => navigations.push(url),
+    onSubmit: (submission, reason) => submissions.push({ submission, reason }),
   });
   cleanups.push(cleanup);
 
-  return { doc: iframe.contentDocument!, iframe, fetched, navigations };
+  return { doc: iframe.contentDocument!, iframe, fetched, navigations, submissions };
 }
 
 describe("renderHtml — sanitization", () => {
-  it("strips scripts, forms, and event handlers", async () => {
+  it("strips scripts, framing, and event handlers", async () => {
     const { doc } = await render(
       `<p onclick="alert(1)">hi</p><script>alert(2)</script>
-       <form action="/x"><input name="q"><button>go</button></form>
-       <iframe src="https://evil.example"></iframe><object data="x"></object>`,
+       <iframe src="https://evil.example"></iframe><object data="x"></object>
+       <embed src="x"><base href="https://evil.example/"><link rel="stylesheet" href="x.css">`,
     );
     const html = doc.documentElement.outerHTML;
-    expect(html).not.toMatch(/<script|onclick|<form|<input|<button|<iframe|<object/i);
+    expect(html).not.toMatch(/<script|onclick|<iframe|<object|<embed|<base|<link/i);
     expect(doc.body.textContent).toContain("hi");
   });
 
@@ -269,5 +279,111 @@ describe("renderError", () => {
     const iframe = errorFrame();
     await renderError(iframe, { heading: "Gone" });
     expect(iframe.contentDocument!.querySelector("a")).toBeNull();
+  });
+});
+
+describe("renderHtml — forms", () => {
+  it("keeps form controls in the document", async () => {
+    const { doc } = await render(
+      `<form action="/s"><input name="q"><button>go</button></form>`,
+    );
+    expect(doc.querySelector("form")).not.toBeNull();
+    expect(doc.querySelector('input[name="q"]')).not.toBeNull();
+    expect(doc.querySelector("button")).not.toBeNull();
+  });
+
+  it("intercepts a GET submit from the sandboxed document", async () => {
+    // Chromium refuses submission (no allow-forms) *before* dispatching the
+    // submit event, so interception hangs off the control click instead.
+    const { doc, submissions } = await render(
+      `<form action="/search"><input name="q" value="cats"><button>go</button></form>`,
+    );
+    doc.querySelector("button")!.click();
+    expect(submissions).toEqual([
+      {
+        submission: {
+          url: "httpx://site@example.org/search?q=cats",
+          method: "GET",
+        },
+        reason: null,
+      },
+    ]);
+  });
+
+  it("intercepts a POST submit with a urlencoded body", async () => {
+    const { doc, submissions } = await render(
+      `<form action="/comment" method="post">
+         <input name="text" value="hi there"><button>send</button>
+       </form>`,
+    );
+    doc.querySelector("button")!.click();
+    const { submission } = submissions[0]!;
+    expect(submission!.method).toBe("POST");
+    expect(submission!.url).toBe("httpx://site@example.org/comment");
+    expect(submission!.body!.toString()).toBe("text=hi+there");
+  });
+
+  it("reports refused forms instead of submitting them", async () => {
+    const { doc, submissions } = await render(
+      `<form action="https://evil.example/collect"><button>go</button></form>`,
+    );
+    // Nothing loadable is left behind either, so a broken listener cannot leak.
+    expect(doc.querySelector("form")!.hasAttribute("action")).toBe(false);
+    doc.querySelector("button")!.click();
+    expect(submissions).toEqual([
+      { submission: null, reason: "external-action" },
+    ]);
+  });
+
+  it("submits on Enter in a text field, using the default button", async () => {
+    const { doc, submissions } = await render(
+      `<form action="/s">
+         <input name="q" value="cats">
+         <button name="b" value="first">a</button>
+         <button name="b" value="second">b</button>
+       </form>`,
+    );
+    doc.querySelector("input")!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    expect(submissions[0]!.submission!.url).toBe(
+      "httpx://site@example.org/s?q=cats&b=first",
+    );
+  });
+
+  it("does not submit on Enter in a textarea", async () => {
+    const { doc, submissions } = await render(
+      `<form action="/s"><textarea name="t">x</textarea></form>`,
+    );
+    doc.querySelector("textarea")!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    expect(submissions).toEqual([]);
+  });
+
+  it("ignores clicks on non-submit controls", async () => {
+    const { doc, submissions } = await render(
+      `<form action="/s">
+         <button type="button">plain</button>
+         <input type="reset" value="reset">
+         <input type="checkbox" name="c">
+       </form>`,
+    );
+    for (const selector of [
+      'button[type="button"]',
+      'input[type="reset"]',
+      'input[type="checkbox"]',
+    ]) {
+      (doc.querySelector(selector) as HTMLElement).click();
+    }
+    expect(submissions).toEqual([]);
+  });
+
+  it("does not navigate the parent when a form is submitted", async () => {
+    const { doc, navigations } = await render(
+      `<form action="/s"><button>go</button></form>`,
+    );
+    doc.querySelector("button")!.click();
+    expect(navigations).toEqual([]);
   });
 });

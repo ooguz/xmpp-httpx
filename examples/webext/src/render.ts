@@ -1,6 +1,16 @@
 import DOMPurify from "dompurify";
 import { resolveHttpxUrl } from "xmpp-httpx";
 import {
+  defaultSubmitter,
+  isImplicitSubmitTarget,
+  isSubmitControl,
+  prepareForms,
+  refusalFor,
+  submissionFor,
+  type FormRefusal,
+  type FormSubmission,
+} from "./forms.js";
+import {
   allowSafeSchemes,
   sanitizeDocumentStyles,
   type CssUrlResolver,
@@ -23,9 +33,6 @@ const PURIFY_CONFIG = {
   FORBID_TAGS: [
     "script",
     "link",
-    "form",
-    "input",
-    "button",
     "iframe",
     "frame",
     "object",
@@ -48,6 +55,8 @@ export interface RenderTarget {
   iframe: HTMLIFrameElement;
   fetchResource: (url: string) => Promise<Blob>;
   onNavigate: (url: string) => void;
+  /** A form was submitted; `null` submission means the form was refused. */
+  onSubmit?: (submission: FormSubmission | null, reason: FormRefusal | null) => void;
 }
 
 /**
@@ -138,6 +147,8 @@ export async function renderHtml(
     if (href) anchor.setAttribute("href", resolveHttpxUrl(baseUrl, href));
   }
 
+  prepareForms(doc, baseUrl);
+
   // Prepended, not appended: page CSS is now allowed and should win.
   const style = doc.createElement("style");
   style.textContent = BASE_STYLE;
@@ -150,8 +161,25 @@ export async function renderHtml(
   });
 
   // allow-same-origin (and no scripts) → we can reach into the document.
-  iframe.contentDocument?.addEventListener("click", (event) => {
-    const anchor = (event.target as Element | null)?.closest?.("a[href]");
+  const frameDoc = iframe.contentDocument;
+
+  const submit = (form: HTMLFormElement, submitter: HTMLElement | null): void => {
+    target.onSubmit?.(submissionFor(form, submitter), refusalFor(form));
+  };
+
+  frameDoc?.addEventListener("click", (event) => {
+    const element = event.target as Element | null;
+
+    // Submit controls first: a click on one never means anything else.
+    const control = element?.closest?.("button, input");
+    if (control && isSubmitControl(control)) {
+      event.preventDefault();
+      const form = control.closest("form");
+      if (form) submit(form as HTMLFormElement, control as HTMLElement);
+      return;
+    }
+
+    const anchor = element?.closest?.("a[href]");
     if (!anchor) return;
     event.preventDefault();
     const href = anchor.getAttribute("href") ?? "";
@@ -160,6 +188,20 @@ export async function renderHtml(
     } else if (/^https?:/i.test(href)) {
       window.open(href, "_blank", "noopener");
     }
+  });
+
+  // Enter-key implicit submission. The sandbox blocks native submission
+  // *before* a submit event would fire, so this is the only way to see it.
+  frameDoc?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+    const element = event.target as Element | null;
+    if (!element || !isImplicitSubmitTarget(element)) return;
+    const form = element.closest("form");
+    if (!form) return;
+    event.preventDefault();
+    submit(form as HTMLFormElement, defaultSubmitter(form as HTMLFormElement));
   });
 
   return () => blobs.revoke();

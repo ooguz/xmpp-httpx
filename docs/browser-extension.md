@@ -146,6 +146,39 @@ zero third-party traffic should restrict the resolver to `httpx:` only.
   as page links. Failed loads offer *Retry*, and a disconnected session offers
   *Connection settings* alongside it instead of only popping the dialog.
 
+### Forms (`src/forms.ts`)
+
+`<form>`, `<input>` and `<button>` are no longer stripped. Supported: GET
+queries and `application/x-www-form-urlencoded` POST bodies — exactly what
+`httpxFetch` can carry (it turns a `URLSearchParams` body into the right
+content type).
+
+The interception mechanism is the interesting part. The sandbox has no
+`allow-forms`, and **Chromium checks that flag before dispatching the `submit`
+event**, so a parent-side `submit` listener never fires at all (verified in
+`test/browser/render.test.ts`). The options were to widen the sandbox with
+`allow-forms` just to receive an event we always cancel, or to drive
+submission the way links are already driven. We do the latter: the parent
+intercepts clicks on submit controls and Enter-key implicit submission, then
+computes the submission itself with `FormData` (which applies the standard
+construction algorithm — disabled controls skipped, unchecked boxes omitted,
+the submitter's own name/value included). The sandbox stays exactly as tight
+as it was.
+
+What is refused, marked at render time and explained at submit time:
+
+| Refusal | Why |
+|---|---|
+| `external-action` | A non-httpx action; the form's `action` attribute is also **removed** so a broken listener still cannot post user input to the internet |
+| `file-upload` | No uploads over httpx; `type=file` and `type=image` inputs are removed outright |
+| `multipart` | Only urlencoded bodies are supported |
+
+`formaction`/`formmethod`/`formenctype`/`formtarget` on submitters and
+`target` on the form are stripped, so a submitter cannot redirect or retarget
+the submission. GET submissions replace any query already in the action (as
+browsers do) and go through normal navigation, so they get a history entry;
+POST results render in place without one, since they are not bookmarkable.
+
 Non-HTML responses render directly: images via blob URL, text in a `<pre>`.
 
 ## Manifest strategy

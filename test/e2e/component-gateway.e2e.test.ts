@@ -3,7 +3,7 @@ import { httpxFetch } from "../../src/client/fetch.js";
 import { allowAll } from "../../src/server/policy.js";
 import { HttpxServer } from "../../src/server/server.js";
 import { connectComponent, connectUser, type E2eClient } from "./e2e-env.js";
-import { demoSiteHandler, LOGO_PNG } from "./demo-site.js";
+import { demoSiteHandler, LOGO_PNG, REPORT_BIN } from "./demo-site.js";
 
 describe("component gateway serving the demo site", () => {
   let alice: E2eClient;
@@ -56,5 +56,38 @@ describe("component gateway serving the demo site", () => {
       session: alice.session,
     });
     expect(response.status).toBe(404);
+  });
+
+  it("serves a GET form submission over the wire", async () => {
+    const response = await httpxFetch(
+      "httpx://web@httpx.localhost/search?q=hello+world",
+      { session: alice.session },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("You searched for <b>hello world</b>");
+  });
+
+  it("serves a urlencoded POST form submission over the wire", async () => {
+    const response = await httpxFetch("httpx://web@httpx.localhost/comment", {
+      session: alice.session,
+      method: "POST",
+      body: new URLSearchParams({ text: "über & out", mood: "happy" }),
+    });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Text: <b>über &amp; out</b>");
+    expect(html).toContain("Mood: <b>happy</b>");
+  });
+
+  it("serves an attachment the browser would save", async () => {
+    const response = await httpxFetch(
+      "httpx://web@httpx.localhost/download/report.bin",
+      { session: alice.session },
+    );
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("content-disposition")).toContain(
+      'filename="httpx-report.bin"',
+    );
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(REPORT_BIN);
   });
 });

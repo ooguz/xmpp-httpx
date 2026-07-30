@@ -1,6 +1,7 @@
 import { httpxFetch, parseHttpxUrl } from "xmpp-httpx";
 import { Connection } from "./connection.js";
 import { filenameFor, isAttachment, isRenderableType, saveBlob } from "./download.js";
+import type { FormRefusal, FormSubmission } from "./forms.js";
 import { extractPageMeta, type PageMeta } from "./page-meta.js";
 import { renderError, renderHtml, renderPlain } from "./render.js";
 import { loadSettings, saveSettings, type ConnectionSettings } from "./settings.js";
@@ -86,10 +87,27 @@ async function navigate(rawUrl: string): Promise<void> {
     return;
   }
 
+  await load(href);
+}
+
+/**
+ * Fetches and displays one httpx URL. Split out of `navigate` so a POST
+ * submission can reuse the whole render/download path without touching the
+ * hash — POST results are not bookmarkable, so they get no history entry.
+ */
+async function load(
+  href: string,
+  init: { method?: "GET" | "POST"; body?: URLSearchParams } = {},
+): Promise<void> {
   resetPage(href);
+  address.value = href;
 
   try {
-    const response = await httpxFetch(href, { session: connection.session });
+    const response = await httpxFetch(href, {
+      session: connection.session,
+      ...(init.method ? { method: init.method } : {}),
+      ...(init.body ? { body: init.body } : {}),
+    });
     const contentType = response.headers.get("content-type") ?? "";
     const disposition = response.headers.get("content-disposition");
 
@@ -102,6 +120,7 @@ async function navigate(rawUrl: string): Promise<void> {
         iframe: viewport,
         fetchResource,
         onNavigate: (nextUrl) => void navigate(nextUrl),
+        onSubmit: (submission, reason) => void submitForm(submission, reason),
       });
       applyPageMeta(href, meta);
     } else {
@@ -116,6 +135,37 @@ async function navigate(rawUrl: string): Promise<void> {
   } catch (err) {
     await showError(`Failed to load ${href}`, err);
   }
+}
+
+const REFUSAL_REASONS: Record<FormRefusal, string> = {
+  "external-action": "This form posts to a non-httpx address, which this browser cannot submit.",
+  "file-upload": "File uploads are not supported over httpx.",
+  multipart: "This form uses multipart/form-data; only urlencoded forms are supported.",
+};
+
+/** GET submissions navigate; POST submissions render in place. */
+async function submitForm(
+  submission: FormSubmission | null,
+  reason: FormRefusal | null,
+): Promise<void> {
+  if (!submission) {
+    const current = address.value;
+    await renderError(
+      viewport,
+      {
+        heading: "Form not submitted",
+        detail: reason ? REFUSAL_REASONS[reason] : "Unsupported form.",
+        actions: [{ id: "back", label: "Back to the page" }],
+      },
+      () => void load(current),
+    );
+    return;
+  }
+  if (submission.method === "GET") {
+    await navigate(submission.url);
+    return;
+  }
+  await load(submission.url, { method: "POST", body: submission.body });
 }
 
 /** Content the viewport can't show is saved instead, with a receipt page. */
