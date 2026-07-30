@@ -5,6 +5,7 @@ import type { XmppSession } from "../session.js";
 import { stanzaBudgets } from "../transport/select.js";
 import type { GatewayConfig } from "./config.js";
 import { Metrics } from "./metrics.js";
+import { createStaticHandler } from "./static-site.js";
 import { startMetricsServer, type RunningMetricsServer } from "./metrics-server.js";
 
 /**
@@ -171,15 +172,20 @@ export async function startGateway(
       : {}),
   });
 
-  const proxy = createOriginProxyHandler(config.origin, {
-    followRedirects: config.followRedirects,
-    jidHeader: config.jidHeader,
-  });
+  // Either shape ends up as one HttpxHandler; everything downstream — logging,
+  // metrics, error mapping — is identical.
+  const handler =
+    config.staticRoot !== undefined
+      ? createStaticHandler(config.staticRoot, { maxAgeSeconds: config.staticMaxAge })
+      : createOriginProxyHandler(config.origin!, {
+          followRedirects: config.followRedirects,
+          jidHeader: config.jidHeader,
+        });
 
   server.handle(async (req) => {
     const started = Date.now();
     try {
-      const response = await proxy(req);
+      const response = await handler(req);
       const status =
         response instanceof Response ? response.status : (response.status ?? 200);
       const durationMs = Date.now() - started;
@@ -195,7 +201,7 @@ export async function startGateway(
     } catch (err) {
       // The server maps this to an IQ error; count it before it leaves.
       metrics.recordRequest(req.method, 502, Date.now() - started);
-      metrics.recordError("origin");
+      metrics.recordError(config.staticRoot === undefined ? "origin" : "static");
       throw err;
     }
   });
@@ -215,7 +221,7 @@ export async function startGateway(
   await entity.start();
   metrics.setStreamUp(true);
   log.info(
-    `serving ${config.origin} as httpx://${jid}/ ` +
+    `serving ${config.staticRoot ?? config.origin!} as httpx://${jid}/ ` +
       `(${config.allow === "all" ? "open to all" : `${config.allow.length} allowed JID(s)`})`,
   );
 

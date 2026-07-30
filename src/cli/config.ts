@@ -19,8 +19,12 @@ export interface GatewayConfig {
   mode: "component" | "client";
   /** XMPP service URI: xmpp://host:port for components, ws(s):// for clients. */
   service: string;
-  /** HTTP origin to reverse-proxy. */
-  origin: string;
+  /** HTTP origin to reverse-proxy. Absent when serving a directory. */
+  origin?: string;
+  /** Directory to serve directly, instead of proxying an origin. */
+  staticRoot?: string;
+  /** Freshness advertised for static files, in seconds. */
+  staticMaxAge: number;
   /** Component domain (component mode). */
   domain?: string;
   secret?: string;
@@ -55,6 +59,8 @@ export type ParseResult =
 interface Fields {
   service?: string;
   origin?: string;
+  staticRoot?: string;
+  staticMaxAge?: number;
   domain?: string;
   secret?: string;
   jid?: string;
@@ -74,15 +80,18 @@ interface Fields {
   configPath?: string;
 }
 
-export const USAGE = `xmpp-httpx-gateway — put an HTTP origin on XMPP (XEP-0332)
+export const USAGE = `xmpp-httpx-gateway — serve a website over XMPP (XEP-0332)
 
 Usage:
   xmpp-httpx-gateway --origin <url> --service <uri> --domain <domain> --secret <s>
+  xmpp-httpx-gateway --static <dir> --service <uri> --domain <domain> --secret <s>
   xmpp-httpx-gateway --origin <url> --service <uri> --jid <jid> --password <p>
   xmpp-httpx-gateway --config gateway.json
 
-Required:
-  --origin <url>          HTTP origin to reverse-proxy (http://localhost:8080)
+Required — the content to serve, one of:
+  --origin <url>          reverse-proxy an HTTP origin (http://localhost:8080)
+  --static <dir>          serve a directory directly, with no HTTP server
+  and the connection:
   --service <uri>         XMPP service (xmpp://host:5347, wss://host/xmpp-websocket)
   and one authentication mode:
   --domain <domain>       component domain, with --secret   (XEP-0114)
@@ -97,6 +106,7 @@ Options:
   --max-stanza <bytes>    derive inline/chunk budgets from the stream limit
   --prefer <mechs>        stream preference, e.g. ibb,chunkedBase64,sipub
   --max-body <bytes>      cap on request bodies (default 8 MiB)
+  --static-max-age <s>    Cache-Control max-age for --static files (default 60)
   --jid-header <name>     header carrying the requester JID (default x-httpx-from)
   --no-jid-header         do not tell the origin who is asking
   --no-compress           disable gzip/deflate Content-Encoding
@@ -123,6 +133,8 @@ const FLAGS_WITH_VALUE = new Set([
   "--password",
   "--allow",
   "--max-stanza",
+  "--static",
+  "--static-max-age",
   "--prefer",
   "--max-body",
   "--jid-header",
@@ -163,6 +175,18 @@ function parseArgv(argv: readonly string[]): { fields: Fields; errors: string[] 
       case "--origin":
         fields.origin = value!; // FLAGS_WITH_VALUE guarantees it
         break;
+      case "--static":
+        fields.staticRoot = value!; // FLAGS_WITH_VALUE guarantees it
+        break;
+      case "--static-max-age": {
+        const parsed = Number(value!);
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          errors.push(`--static-max-age needs a non-negative integer, got "${value!}"`);
+        } else {
+          fields.staticMaxAge = parsed;
+        }
+        break;
+      }
       case "--service":
         fields.service = value!; // FLAGS_WITH_VALUE guarantees it
         break;
@@ -297,11 +321,20 @@ function parseFile(contents: string): { fields: Fields; errors: string[] } {
 
   assign(fields, "service", string("service"));
   assign(fields, "origin", string("origin"));
+  assign(fields, "staticRoot", string("static"));
   assign(fields, "domain", string("domain"));
   assign(fields, "secret", string("secret"));
   assign(fields, "jid", string("jid"));
   assign(fields, "password", string("password"));
   assign(fields, "maxStanzaBytes", positive("maxStanzaBytes"));
+  const staticMaxAge = source["staticMaxAge"];
+  if (staticMaxAge !== undefined) {
+    if (typeof staticMaxAge === "number" && Number.isInteger(staticMaxAge) && staticMaxAge >= 0) {
+      fields.staticMaxAge = staticMaxAge;
+    } else {
+      errors.push('config "staticMaxAge" must be a non-negative integer');
+    }
+  }
   assign(fields, "maxRequestBodyBytes", positive("maxRequestBodyBytes"));
   assign(fields, "compress", boolean("compress"));
   assign(fields, "followRedirects", boolean("followRedirects"));
@@ -380,7 +413,11 @@ export function parseConfig(inputs: ParseInputs): ParseResult {
   const errors = [...fromFile.errors, ...fromArgv.errors];
   const warnings: string[] = [];
 
-  if (!fields.origin) errors.push("--origin is required");
+  if (fields.origin && fields.staticRoot) {
+    errors.push("choose one: --origin (proxy an HTTP server) or --static (serve a directory)");
+  } else if (!fields.origin && !fields.staticRoot) {
+    errors.push("nothing to serve: pass --origin <url> or --static <dir>");
+  }
   if (!fields.service) errors.push("--service is required");
 
   const component = Boolean(fields.domain ?? fields.secret);
@@ -422,7 +459,9 @@ export function parseConfig(inputs: ParseInputs): ParseResult {
   const config: GatewayConfig = {
     mode: component ? "component" : "client",
     service: fields.service!,
-    origin: fields.origin!,
+    staticMaxAge: fields.staticMaxAge ?? 60,
+    ...(fields.origin !== undefined ? { origin: fields.origin } : {}),
+    ...(fields.staticRoot !== undefined ? { staticRoot: fields.staticRoot } : {}),
     allow: fields.allowAll ? "all" : (fields.allow ?? []),
     compress: fields.compress ?? true,
     jidHeader: fields.jidHeader ?? "x-httpx-from",

@@ -68,6 +68,30 @@ Watch it work: `docker compose logs -f gateway` prints one line per request.
 - `docker compose stop` sends SIGTERM; the CLI closes the XMPP stream and exits
   0, so the server never waits on a dead connection.
 
+## Variant: no origin at all
+
+The gateway can serve the directory itself, which drops the `origin` container:
+
+```diff
+ # gateway.json
+-  "origin": "http://origin:80",
++  "static": "/srv/site",
+
+ # compose.yml, service gateway
+   volumes:
+     - ./gateway.json:/etc/xmpp-httpx/gateway.json:ro
++    - ./site:/srv/site:ro
+   depends_on:
+     prosody:
+       condition: service_healthy
+-    origin:
+-      condition: service_healthy
+```
+
+Same URLs, two containers, and the files are served straight from disk with
+`ETag`s so revalidation costs a 304 instead of a body. Use `--origin` when you
+have a real application behind it; use `--static` for a site that is just files.
+
 ## What is demo-grade here
 
 `prosody.cfg.lua` allows **plaintext auth over an unencrypted websocket** so the

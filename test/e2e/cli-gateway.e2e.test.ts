@@ -1,4 +1,7 @@
 import { createServer, type Server } from "node:http";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { httpxFetch } from "../../src/client/fetch.js";
 import { parseConfig } from "../../src/cli/config.js";
@@ -153,5 +156,93 @@ describe("gateway CLI serving an HTTP origin", () => {
     expect(metrics).toContain(
       'httpx_gateway_requests_denied_total{jid="bob@localhost"} 1',
     );
+  });
+});
+
+describe("gateway CLI serving a directory (--static)", () => {
+  let root: string;
+  let gateway: RunningGateway;
+  let alice: E2eClient;
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "httpx-static-e2e-"));
+    await writeFile(join(root, "index.html"), "<h1>static home</h1>");
+    await writeFile(join(root, "note.txt"), "plain text");
+
+    const parsed = parseConfig({
+      argv: [
+        "--static",
+        root,
+        "--service",
+        "xmpp://localhost:15347",
+        "--domain",
+        GATEWAY_JID,
+        "--allow-all",
+        "--quiet",
+      ],
+      env: { XMPP_HTTPX_SECRET: "e2e-secret" },
+    });
+    if (parsed.kind !== "config") {
+      throw new Error(`config rejected: ${JSON.stringify(parsed)}`);
+    }
+    gateway = await startGateway(parsed.config, {
+      info: () => {},
+      error: (message, err) => console.error("[static-e2e]", message, err),
+      request: () => {},
+    });
+    alice = await connectUser("alice", "e2e-alice", "static-client");
+  });
+
+  afterAll(async () => {
+    await alice?.stop();
+    await gateway?.stop();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("serves the directory index with no HTTP server involved", async () => {
+    const response = await httpxFetch(`httpx://${GATEWAY_JID}/`, {
+      session: alice.session,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(await response.text()).toContain("static home");
+  });
+
+  it("serves other files with their own type", async () => {
+    const response = await httpxFetch(`httpx://${GATEWAY_JID}/note.txt`, {
+      session: alice.session,
+    });
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(await response.text()).toBe("plain text");
+  });
+
+  it("revalidates with a real 304 over the wire", async () => {
+    const first = await httpxFetch(`httpx://${GATEWAY_JID}/`, {
+      session: alice.session,
+    });
+    const etag = first.headers.get("etag")!;
+    expect(etag).toBeTruthy();
+    await first.text();
+
+    const revalidated = await httpxFetch(`httpx://${GATEWAY_JID}/`, {
+      session: alice.session,
+      headers: { "if-none-match": etag },
+    });
+    expect(revalidated.status).toBe(304);
+    expect(await revalidated.text()).toBe("");
+  });
+
+  it("404s a missing file and never escapes the root", async () => {
+    const missing = await httpxFetch(`httpx://${GATEWAY_JID}/nope.html`, {
+      session: alice.session,
+    });
+    expect(missing.status).toBe(404);
+    await missing.text();
+
+    const traversal = await httpxFetch(`httpx://${GATEWAY_JID}/../../etc/passwd`, {
+      session: alice.session,
+    });
+    expect([403, 404]).toContain(traversal.status);
+    expect(await traversal.text()).not.toContain("root:");
   });
 });

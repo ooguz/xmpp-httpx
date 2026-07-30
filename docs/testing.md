@@ -14,8 +14,9 @@ suite against a real Prosody.
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
 
 Two directories are single-project by nature: `test/integration-node/`
-(raw TCP sockets for SOCKS5 bytestreams, and the CLI's metrics/health listener
-over a real socket) runs only under `node`, and
+(raw TCP sockets for SOCKS5 bytestreams, the CLI's metrics/health listener over
+a real socket, and the static-site handler against real temp directories) runs
+only under `node`, and
 `test/browser/` (real CSSOM, `DOMParser`, blob URLs) only under `browser`.
 
 The `browser` project exists to *prove* the browser-safe-core rule: the full
@@ -106,7 +107,13 @@ body with non-ASCII text, an attachment, and an `If-None-Match` → **304**
 round trip — the whole surface the WebExtension drives), plus
 `cli-gateway.e2e.test.ts` (the gateway CLI in front of a real HTTP origin:
 status pass-through, `X-Httpx-From`, a proxied POST body, and an unlisted JID
-refused *before* the origin is contacted).
+refused *before* the origin is contacted) and, in the same file, a `--static`
+gateway serving a temp directory with a real 304 revalidation over the wire.
+
+The static handler's path safety is tested where it can be tested honestly — on
+a real filesystem (`test/integration-node/static-site.test.ts`): percent-encoded
+traversal, a sibling directory sharing the root's name prefix, and a **symlink
+pointing out of the root**, each asserted not to return the outside file.
 
 E2E files run **sequentially** (`fileParallelism: false`): they share one
 Prosody, and a component domain admits exactly one connection — two suites

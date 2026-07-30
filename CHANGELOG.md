@@ -8,6 +8,10 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **Static-site mode** for the gateway: `--static <dir>` serves a directory
+  directly, with no HTTP origin — validators for cheap 304s, streamed bodies,
+  and containment checked twice (lexically and against the real path, so a
+  symlink cannot lead out of the root).
 - **Gateway observability**: `--log-format json`, and `--metrics-port` serving
   Prometheus metrics plus a `/healthz` liveness endpoint (loopback-bound by
   default). Requests, denials and errors are counted; request duration is a

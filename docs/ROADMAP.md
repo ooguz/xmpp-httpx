@@ -228,8 +228,12 @@ Goal: `createOriginProxyHandler` is one line away from being a deployable
   so handler errors and refusals are counted, not just returned. The registry is
   hand-rolled to keep the dependency count at one. This also unblocked the
   container healthcheck that the Docker item had to skip.
-- [ ] **Static-site mode** (S) — serve a directory (the demo-site handler
-  generalized) without an HTTP origin.
+- [x] **Static-site mode** (S) — `--static <dir>` instead of `--origin`: index
+  files, extension-based types, streamed bodies, `HEAD`, 405 for anything that
+  would change something, and `ETag`/`Last-Modified`/`max-age` so revalidation
+  costs a 304 with no body. Containment is checked twice — lexically after
+  percent-decoding, then against the *real* path, since `resolve()` does not
+  follow symlinks and a link out of the root would otherwise be served.
 - [ ] **Rate limiting** (S) — token bucket per bare JID in front of
   `authorize`.
 

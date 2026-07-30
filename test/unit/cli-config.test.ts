@@ -75,9 +75,9 @@ describe("parseConfig — modes", () => {
     ).toContain("--password is required in client mode");
   });
 
-  it("requires an origin, a service, and authentication", () => {
+  it("requires something to serve, a service, and authentication", () => {
     const messages = errors([]);
-    expect(messages).toContain("--origin is required");
+    expect(messages).toContain("nothing to serve: pass --origin <url> or --static <dir>");
     expect(messages).toContain("--service is required");
     expect(messages).toContain(
       "no authentication given: use --domain/--secret or --jid/--password",
@@ -169,6 +169,60 @@ describe("parseConfig — options", () => {
   it("reports unknown flags and missing values", () => {
     expect(errors([...BASE, "--turbo"])).toContain('unknown option "--turbo"');
     expect(errors(["--origin"])).toContain("--origin needs a value");
+  });
+});
+
+describe("parseConfig — what to serve", () => {
+  const BASE_NO_ORIGIN = BASE.filter(
+    (arg) => arg !== "--origin" && arg !== "http://localhost:8080",
+  );
+
+  it("accepts a static directory instead of an origin", () => {
+    const { config } = ok([...BASE_NO_ORIGIN, "--static", "/srv/site"]);
+    expect(config.staticRoot).toBe("/srv/site");
+    expect(config.origin).toBeUndefined();
+    expect(config.staticMaxAge).toBe(60);
+  });
+
+  it("refuses both at once", () => {
+    expect(errors([...BASE, "--static", "/srv/site"])).toContain(
+      "choose one: --origin (proxy an HTTP server) or --static (serve a directory)",
+    );
+  });
+
+  it("refuses neither", () => {
+    expect(errors(BASE_NO_ORIGIN)).toContain(
+      "nothing to serve: pass --origin <url> or --static <dir>",
+    );
+  });
+
+  it("takes a static max-age, including zero", () => {
+    expect(
+      ok([...BASE_NO_ORIGIN, "--static", "/s", "--static-max-age", "0"]).config
+        .staticMaxAge,
+    ).toBe(0);
+    expect(
+      ok([...BASE_NO_ORIGIN, "--static", "/s", "--static-max-age", "3600"]).config
+        .staticMaxAge,
+    ).toBe(3600);
+    expect(
+      errors([...BASE_NO_ORIGIN, "--static", "/s", "--static-max-age", "-1"]),
+    ).toContain('--static-max-age needs a non-negative integer, got "-1"');
+  });
+
+  it("reads static settings from a config file", () => {
+    const { config } = ok([], {
+      configFile: JSON.stringify({
+        service: "xmpp://s",
+        static: "/srv/site",
+        domain: "d",
+        secret: "x",
+        allow: "all",
+        staticMaxAge: 120,
+      }),
+    });
+    expect(config.staticRoot).toBe("/srv/site");
+    expect(config.staticMaxAge).toBe(120);
   });
 });
 

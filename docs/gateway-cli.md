@@ -1,8 +1,9 @@
 # `xmpp-httpx-gateway` — putting a website on XMPP
 
-The gateway CLI is `createOriginProxyHandler` with a face: it connects to XMPP,
-answers XEP-0332 requests, and forwards them to an ordinary HTTP origin. Your
-site keeps running as it is; XMPP becomes an additional way in.
+The gateway CLI connects to XMPP, answers XEP-0332 requests, and serves them
+from either an ordinary HTTP origin (`--origin`) or a directory on disk
+(`--static`). Your site keeps running as it is; XMPP becomes an additional way
+in.
 
 ```sh
 XMPP_HTTPX_SECRET=… npx xmpp-httpx-gateway \
@@ -107,6 +108,37 @@ The CLI ships as a `bin` of the main package, so `npx xmpp-httpx-gateway` works
 without a global install. It needs `@xmpp/component` (or `@xmpp/client`) present
 — those are optional peers of the library, and the CLI says exactly which one to
 install if it is missing rather than printing a stack trace.
+
+## Serving a directory instead of an origin
+
+`--static <dir>` drops the HTTP server entirely — no nginx, no origin process,
+one container instead of two:
+
+```sh
+XMPP_HTTPX_SECRET=... xmpp-httpx-gateway \
+  --static /srv/site --service xmpp://xmpp.example.org:5347 \
+  --domain web.example.org --allow-all
+```
+
+It serves `index.html` for directories, types files by extension, streams bodies
+(so a large file is never held in memory), and answers `HEAD`. Anything other
+than GET/HEAD gets a 405 — a static site has nothing to change.
+
+Every response carries `ETag` and `Last-Modified`, plus `Cache-Control:
+max-age=60` (tune with `--static-max-age`, `0` to omit). Those validators are
+the point: revalidation costs a **304 with no body**, and on this transport the
+body is the expensive part.
+
+Path safety is checked twice, because request paths come off the network:
+
+1. **Lexically**, after percent-decoding, so `%2e%2e%2f` cannot smuggle segments
+   past the check. Note that `..` in an absolute path *collapses* rather than
+   escaping — `/../secret` means `<root>/secret`, exactly as an HTTP server
+   treats it — so traversal attempts surface as 404s.
+2. **Against the real path**, because `resolve()` does not follow symlinks. A
+   link inside the root pointing at `/etc/ssl` is refused with a 403 rather than
+   served, and the check compares real paths on both sides so a root under a
+   symlinked parent (`/tmp` -> `/private/tmp`) still works.
 
 ## Observability
 
