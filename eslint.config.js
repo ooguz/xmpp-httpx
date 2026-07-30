@@ -15,7 +15,11 @@ const PLATFORM_SPECIFIC_GLOBALS = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist/", "node_modules/", "coverage/", "examples/*/dist/"] },
+  {
+    // docs/api/ is generated typedoc output (gitignored); it only exists after
+    // a local `npm run docs:api`, and linting it is meaningless noise.
+    ignores: ["dist/", "node_modules/", "coverage/", "examples/*/dist/", "docs/api/"],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
@@ -44,6 +48,9 @@ export default tseslint.config(
         atob: "readonly",
         btoa: "readonly",
         setTimeout: "readonly",
+        clearTimeout: "readonly",
+        queueMicrotask: "readonly",
+        ReadableStream: "readonly",
         URL: "readonly",
       },
     },

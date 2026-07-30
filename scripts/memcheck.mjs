@@ -13,7 +13,6 @@
 import { HttpxClient } from "../dist/client/client.js";
 import { HttpxServer } from "../dist/server/server.js";
 import { allowAll } from "../dist/server/policy.js";
-import { bytesFromStream, streamFromBytes } from "../dist/util/bytes.js";
 
 // Minimal mock session pair (mirrors test/integration/mock-session.ts).
 import xml from "@xmpp/xml";

@@ -2,7 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "rootDir": "src"
+    "rootDir": "src",
+    // src/node/ is deliberately Node-only (net sockets, Buffer); the browser
+    // safety of everything else is enforced by eslint's no-restricted-globals,
+    // not by withholding these types. `npm run typecheck` only sees them by
+    // accident, via the reference vitest's config types pull in.
+    "types": ["node"]
   },
   "include": ["src", "types"]
 }
