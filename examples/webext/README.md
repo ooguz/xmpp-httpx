@@ -20,9 +20,10 @@ manifest variants.
   `url()` references fetched over httpx like images.
 - **Forms**: GET queries and urlencoded POST bodies, driven by the parent page
   (uploads, multipart and non-httpx actions are refused with an explanation).
-- **Caching**: Cache API keyed by httpx URL, honoring `Cache-Control`/`ETag`
-  with `If-None-Match` revalidation; the chrome shows `cache` / `304` /
-  `network` for the current page, and the settings dialog can clear it.
+- **Caching**: Cache API keyed by httpx URL and partitioned per account,
+  honoring `Cache-Control`/`ETag` with `If-None-Match` revalidation; the chrome
+  shows `cache` / `304` / `network` for the current page, and the settings
+  dialog can clear it.
 - **Downloads** for content the viewport can't display, **page titles and
   favicons** from the fetched document, and error pages with working retry.
 

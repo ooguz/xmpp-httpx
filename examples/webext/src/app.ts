@@ -1,5 +1,11 @@
 import { httpxFetch, parseHttpxUrl } from "xmpp-httpx";
-import { cachedFetch, clearCache, invalidate, type CacheState } from "./cache.js";
+import {
+  cachedFetch,
+  clearCache,
+  invalidate,
+  setCacheScope,
+  type CacheState,
+} from "./cache.js";
 import { Connection } from "./connection.js";
 import { filenameFor, isAttachment, isRenderableType, saveBlob } from "./download.js";
 import type { FormRefusal, FormSubmission } from "./forms.js";
@@ -261,12 +267,12 @@ function applyPageMeta(href: string, meta: PageMeta): void {
   if (meta.iconUrl) void loadFavicon(meta.iconUrl);
 }
 
-/** Page-declared icons travel over httpx too, so they need fetching first. */
+/**
+ * Page-declared icons are always httpx (see page-meta.ts) and are fetched over
+ * the session into a blob URL: the extension page itself never issues a remote
+ * request on a page's behalf.
+ */
 async function loadFavicon(iconUrl: string): Promise<void> {
-  if (!iconUrl.startsWith("httpx://")) {
-    favicon.setAttribute("href", iconUrl); // https — the browser can load it
-    return;
-  }
   try {
     const blob = await fetchResource(iconUrl);
     const url = URL.createObjectURL(blob);
@@ -334,6 +340,7 @@ $<HTMLFormElement>("settingsForm").addEventListener("submit", (event) => {
   void (async () => {
     await saveSettings(settings);
     try {
+      setCacheScope(settings.jid);
       await connection.connect(settings);
       const pending = window.location.hash.slice(1);
       if (pending) void navigate(pending);
@@ -354,6 +361,7 @@ void (async () => {
   const initial = window.location.hash.slice(1);
   if (saved.service && saved.jid) {
     try {
+      setCacheScope(saved.jid);
       await connection.connect(saved as ConnectionSettings);
     } catch (err) {
       console.warn("[httpx] auto-connect failed:", err);

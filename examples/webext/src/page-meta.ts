@@ -33,8 +33,15 @@ export function extractPageMeta(html: string, baseUrl: string): PageMeta {
 
 /**
  * The last declared icon wins, matching how browsers treat later `<link>`
- * elements as overrides. Only httpx (fetched over XMPP) and https (loaded
- * directly) are accepted — the same trust set as page images.
+ * elements as overrides.
+ *
+ * **httpx only.** The favicon is the one page-supplied resource that lands on
+ * the *extension* page rather than inside the sandboxed iframe, and the
+ * extension page otherwise loads nothing remote. Honoring an `https:` icon
+ * would let any visited page make the privileged origin issue a cross-origin
+ * request — an IP/visit ping with third-party cookies attached — so those are
+ * ignored. httpx icons travel over the XMPP session like every other
+ * subresource.
  */
 function pickIcon(doc: Document, baseUrl: string): string | undefined {
   const links = [...doc.querySelectorAll('link[rel~="icon"][href]')].reverse();
@@ -47,7 +54,7 @@ function pickIcon(doc: Document, baseUrl: string): string | undefined {
     } catch {
       continue;
     }
-    if (/^(?:httpx|https):/i.test(resolved)) return resolved;
+    if (resolved.startsWith("httpx://")) return resolved;
   }
   return undefined;
 }

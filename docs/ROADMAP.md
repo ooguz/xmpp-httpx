@@ -86,9 +86,17 @@ Goal: trust the implementation under adversarial and heavy load.
 - [x] **Memory audit** (S) — `scripts/memcheck.mjs` streams 1 MiB and 16 MiB
   IBB bodies and samples live (post-GC) heap; fails if retention scales
   with body size. Verified locally: 0.00x heap ratio for a 16x larger body.
-- [ ] **Security review** (M) — run `/security-review` over the full tree;
-  external eyes on the sandbox/rendering pipeline reasoning in the
-  extension.
+- [x] **Security review** (M) — run over the phase 10 extension work (CSS
+  sanitizer, forms, downloads, metadata, cache). Two real findings, both fixed
+  in the same round: page-declared **favicons were honored over `https:`**,
+  which let any visited page make the *privileged extension origin* issue a
+  cross-origin request (now httpx-only); and the **response cache was shared
+  across XMPP accounts** even though httpx authorizes per requester JID (now
+  partitioned as `httpx-v1:<bare JID>`). Everything else held: no script
+  execution path into the iframe, no rule/markup injection through CSSOM
+  serialization, no traversal through `Content-Disposition`, no forged
+  freshness (`x-httpx-stored-at` is always overwritten locally, `Age` is
+  clamped). External eyes on the sandbox reasoning are still worth having.
 
 Acceptance: fuzz + adversarial suites green in CI (done); published
 benchmark numbers (done, mock-pair only); no O(body) memory paths (done);

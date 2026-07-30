@@ -81,6 +81,39 @@ describe("sanitizeStylesheet", () => {
     expect(css).toContain('url("#blur")'); // CSSOM quotes it; same reference
   });
 
+  it("keeps a url() whose path contains a closing paren", () => {
+    const css = sanitizeStylesheet(
+      `div { background-image: url("image (1).png") }`,
+      BASE,
+    );
+    expect(css).toContain("httpx://site@example.org/dir/image%20(1).png");
+  });
+
+  it("still rejects an untrusted url() that contains a paren", () => {
+    const css = sanitizeStylesheet(
+      `div { background-image: url("http://insecure.example/a)b.png") }`,
+      BASE,
+    );
+    expect(css).not.toContain("insecure.example");
+  });
+
+  it("rewrites several url() tokens in one value", () => {
+    const css = sanitizeStylesheet(
+      `div { background-image: url(a.png), url("https://cdn.example/b.png") }`,
+      BASE,
+    );
+    expect(css).toContain("httpx://site@example.org/dir/a.png");
+    expect(css).toContain("https://cdn.example/b.png");
+  });
+
+  it("drops the declaration when any one of several url() is untrusted", () => {
+    const css = sanitizeStylesheet(
+      `div { background-image: url(a.png), url(http://insecure.example/b.png) }`,
+      BASE,
+    );
+    expect(squash(css)).toBe("div { }");
+  });
+
   it("drops legacy script vectors", () => {
     const css = sanitizeStylesheet(
       `div { width: expression(alert(1)); behavior: url(#default#time2);

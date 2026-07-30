@@ -15,7 +15,7 @@
  * `If-None-Match`/`If-Modified-Since` producing a real 304.
  */
 
-const CACHE_NAME = "httpx-v1";
+const CACHE_PREFIX = "httpx-v1:";
 const KEY_ORIGIN = "https://httpx.invalid/";
 /** Header recording when we stored the entry, for age computation. */
 const STORED_AT = "x-httpx-stored-at";
@@ -44,9 +44,22 @@ function cacheKey(httpxUrl: string): string {
   return KEY_ORIGIN + encodeURIComponent(httpxUrl);
 }
 
+/**
+ * Which account's cache we are using. httpx servers authorize per requester
+ * JID — an origin proxy even forwards it as `X-Httpx-From` — so one account's
+ * responses must never be served to another. Partitioning by bare JID makes
+ * that structural instead of relying on remembering to clear on switch.
+ */
+let scope = "anonymous";
+
+export function setCacheScope(jid: string): void {
+  const bare = jid.split("/")[0]?.toLowerCase() ?? "";
+  scope = bare === "" ? "anonymous" : bare;
+}
+
 async function openCache(): Promise<Cache | undefined> {
   try {
-    return await caches.open(CACHE_NAME);
+    return await caches.open(CACHE_PREFIX + scope);
   } catch {
     return undefined; // no Cache API (or storage denied) — degrade to no cache
   }
@@ -213,10 +226,15 @@ export async function invalidate(href: string): Promise<void> {
   await cache?.delete(cacheKey(href)).catch(() => false);
 }
 
-/** Empties the cache; exposed for the settings dialog and tests. */
+/**
+ * Empties every account's cache, not just the current scope — "Clear cache"
+ * has to mean it, including partitions left behind by accounts since removed.
+ */
 export async function clearCache(): Promise<void> {
   try {
-    await caches.delete(CACHE_NAME);
+    for (const name of await caches.keys()) {
+      if (name.startsWith(CACHE_PREFIX)) await caches.delete(name);
+    }
   } catch {
     // Nothing to clear.
   }

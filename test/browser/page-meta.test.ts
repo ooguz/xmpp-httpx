@@ -49,14 +49,19 @@ describe("extractPageMeta", () => {
     expect(meta.iconUrl).toBe("httpx://site@example.org/dir/second.png");
   });
 
-  it("keeps https icons and refuses other schemes", () => {
-    expect(
-      extractPageMeta('<link rel="icon" href="https://cdn.example/f.png">', BASE)
-        .iconUrl,
-    ).toBe("https://cdn.example/f.png");
-    for (const href of ["javascript:alert(1)", "ftp://example.org/f.ico"]) {
+  it("accepts httpx icons only", () => {
+    // An https icon would make the *extension* page issue a cross-origin
+    // request on a hostile page's behalf; it is ignored on purpose.
+    for (const href of [
+      "https://cdn.example/f.png",
+      "http://cdn.example/f.png",
+      "javascript:alert(1)",
+      "ftp://example.org/f.ico",
+      "data:image/png;base64,iVBOR",
+    ]) {
       expect(
         extractPageMeta(`<link rel="icon" href="${href}">`, BASE).iconUrl,
+        href,
       ).toBeUndefined();
     }
   });
@@ -67,6 +72,12 @@ describe("extractPageMeta", () => {
       BASE,
     );
     expect(meta.iconUrl).toBe("httpx://site@example.org/good.png");
+    expect(
+      extractPageMeta(
+        '<link rel="icon" href="/good.png"><link rel="icon" href="https://cdn.example/x.png">',
+        BASE,
+      ).iconUrl,
+    ).toBe("httpx://site@example.org/good.png");
   });
 
   it("ignores non-icon link relations", () => {

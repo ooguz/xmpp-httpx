@@ -61,8 +61,8 @@ Fetched HTML is hostile input. The pipeline:
 
 ```
 httpxFetch(url) → DOMPurify.sanitize        (WHOLE_DOCUMENT; FORBID: script,
-                                             link, form, iframe, object,
-                                             embed, base, meta …; custom
+                                             link, iframe, object, embed,
+                                             base, meta …; custom
                                              ALLOWED_URI_REGEXP admitting httpx:)
    → DOMParser
    → CSS pass 1: sanitize <style>/style= , resolve every url() to absolute,
@@ -72,9 +72,12 @@ httpxFetch(url) → DOMPurify.sanitize        (WHOLE_DOCUMENT; FORBID: script,
      (one fetch per URL, revoked on navigation)
    → CSS pass 2: swap httpx url() for its blob: URL, drop the declaration
                  when the resource never arrived
+   → prepareForms: resolve actions, mark refusals, strip submitter overrides
    → srcdoc into <iframe sandbox="allow-same-origin">   ← NO allow-scripts
-   → parent intercepts clicks in iframe.contentDocument:
-        httpx:// → in-place navigation; http(s):// → real new tab
+   → parent intercepts, in iframe.contentDocument:
+        link clicks    → httpx:// in place; http(s):// a real new tab
+        submit control → compute the submission and drive the fetch
+        Enter key      → the same, for implicit submission
 ```
 
 Security reasoning, layer by layer:
@@ -133,8 +136,14 @@ zero third-party traffic should restrict the resolver to `httpx:` only.
   reference with it. Parsing hostile HTML there is inert (`DOMParser` executes
   no scripts and fetches no subresources) and everything extracted is used as
   text or re-resolved as a URL, never as markup. The title is trimmed and
-  capped; the icon must resolve to `httpx:` (fetched over XMPP into a `blob:`
-  URL, revoked on navigation) or `https:`, and the last declared icon wins.
+  capped; the last declared icon wins.
+
+  Icons are accepted **only** over `httpx:` (fetched through the session into a
+  `blob:` URL, revoked on navigation). The favicon is the one page-supplied
+  resource that lands on the *extension* page rather than inside the sandboxed
+  iframe, and the extension page otherwise loads nothing remote — honoring an
+  `https:` icon would let any visited page make the privileged origin issue a
+  cross-origin request with third-party cookies attached.
 - **Non-renderable responses are saved, not shown**: anything that is not
   text, an image, or structured text (`+json`/`+xml`), and anything sent with
   `Content-Disposition: attachment`, goes to `downloads.download` (permission
@@ -189,6 +198,13 @@ Responses are cached in the **Cache API**, which brings one constraint worth
 knowing: it only accepts http(s) request keys, so every httpx URL is mapped to
 a synthetic `https://httpx.invalid/<encoded>` key. Nothing ever fetches that
 URL — it is a key, not an address.
+
+The cache is **partitioned per account** (`httpx-v1:<bare JID>`). httpx servers
+authorize per requester JID — an origin proxy even forwards it as
+`X-Httpx-From` — so a response fetched as one account must never be served to
+another. Naming the cache after the account makes that structural rather than
+something to remember on account switch; "Clear cache" clears every partition,
+including ones left by accounts since removed.
 
 Bodies are buffered once and re-wrapped for both the caller and the cache.
 Teeing the stream instead would deadlock as soon as one side applied

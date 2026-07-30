@@ -5,13 +5,20 @@ import {
   invalidate,
   isFresh,
   isStorable,
+  setCacheScope,
 } from "../../examples/webext/src/cache.js";
 
 const URL_A = "httpx://site@example.org/dir/page.html";
 const URL_B = "httpx://site@example.org/other.html";
 
-beforeEach(clearCache);
-afterEach(clearCache);
+beforeEach(async () => {
+  setCacheScope("alice@example.org");
+  await clearCache();
+});
+afterEach(async () => {
+  setCacheScope("alice@example.org");
+  await clearCache();
+});
 
 /** A server whose responses and request headers the test controls. */
 function server(
@@ -230,5 +237,40 @@ describe("cachedFetch", () => {
     const result = await cachedFetch(URL_A, s.fetcher);
     expect(result.state).toBe("bypass");
     expect(await result.response.text()).toBe("<p>full</p>");
+  });
+});
+
+describe("cache scoping", () => {
+  it("never serves one account's entry to another", async () => {
+    const s = server((_h, call) =>
+      html(`<p>${call}</p>`, { "cache-control": "max-age=600" }),
+    );
+    setCacheScope("alice@example.org/laptop");
+    await (await cachedFetch(URL_A, s.fetcher)).response.text();
+    expect((await cachedFetch(URL_A, s.fetcher)).state).toBe("hit");
+
+    setCacheScope("bob@example.org");
+    const other = await cachedFetch(URL_A, s.fetcher);
+    expect(other.state).toBe("miss");
+    expect(await other.response.text()).toBe("<p>2</p>");
+
+    // Alice's copy is untouched, and the resource part of her JID is ignored.
+    setCacheScope("alice@example.org/phone");
+    const back = await cachedFetch(URL_A, s.fetcher);
+    expect(back.state).toBe("hit");
+    expect(await back.response.text()).toBe("<p>1</p>");
+  });
+
+  it("clearCache empties every account's partition", async () => {
+    const s = server(() => html("<p>x</p>", { "cache-control": "max-age=600" }));
+    for (const jid of ["alice@example.org", "bob@example.org"]) {
+      setCacheScope(jid);
+      await (await cachedFetch(URL_A, s.fetcher)).response.text();
+    }
+    await clearCache();
+    for (const jid of ["alice@example.org", "bob@example.org"]) {
+      setCacheScope(jid);
+      expect((await cachedFetch(URL_A, s.fetcher)).state).toBe("miss");
+    }
   });
 });

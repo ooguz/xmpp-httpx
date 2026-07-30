@@ -17,7 +17,6 @@ import { resolveHttpxUrl } from "xmpp-httpx";
 const ALLOWED_URL_SCHEME = /^(?:httpx|https|data|blob):/i;
 const DANGEROUS_VALUE = /expression\s*\(|-moz-binding|javascript:/i;
 const DANGEROUS_PROPS = new Set(["behavior", "-moz-binding"]);
-const URL_TOKEN = /url\(\s*([^)]*?)\s*\)/gi;
 /** Bound the parser's work; real stylesheets are orders of magnitude smaller. */
 const MAX_CSS_LENGTH = 512 * 1024;
 
@@ -47,22 +46,60 @@ function resolveToken(
   return resolve(absolute);
 }
 
+/**
+ * Reads one `url()` token starting after the opening paren. Quoted forms are
+ * scanned honoring the quote, so a ")" *inside* the URL does not end the token
+ * early — a regex up to the first ")" silently mangles `url("a)b.png")`.
+ */
+function readUrlToken(
+  value: string,
+  from: number,
+): { raw: string; end: number } | null {
+  let i = from;
+  while (i < value.length && /\s/.test(value[i]!)) i++;
+  const quote = value[i];
+  if (quote !== '"' && quote !== "'") {
+    // Unquoted: CSS forbids an unescaped ")" here, so the first one ends it.
+    const close = value.indexOf(")", i);
+    return close === -1 ? null : { raw: value.slice(i, close).trim(), end: close + 1 };
+  }
+  i++;
+  let raw = "";
+  for (; i < value.length; i++) {
+    const ch = value[i]!;
+    if (ch === "\\") {
+      raw += value[i + 1] ?? ""; // escaped character stands for itself
+      i++;
+      continue;
+    }
+    if (ch === quote) break;
+    raw += ch;
+  }
+  i++; // past the closing quote
+  while (i < value.length && /\s/.test(value[i]!)) i++;
+  return value[i] === ")" ? { raw, end: i + 1 } : null;
+}
+
 /** Rewrites every `url()` in a value, or returns null if one was rejected. */
 function rewriteUrls(
   value: string,
   baseUrl: string,
   resolve: CssUrlResolver,
 ): string | null {
-  let rejected = false;
-  const rewritten = value.replace(URL_TOKEN, (match, raw: string) => {
-    const replacement = resolveToken(raw, baseUrl, resolve);
-    if (replacement === null) {
-      rejected = true;
-      return match;
-    }
-    return `url("${replacement.replace(/[\\"]/g, "\\$&")}")`;
-  });
-  return rejected ? null : rewritten;
+  let out = "";
+  let index = 0;
+  const lowered = value.toLowerCase();
+  for (;;) {
+    const start = lowered.indexOf("url(", index);
+    if (start === -1) return out + value.slice(index);
+    const token = readUrlToken(value, start + 4);
+    if (!token) return out + value.slice(index); // malformed; CSSOM will refuse it
+    const replacement = resolveToken(token.raw, baseUrl, resolve);
+    if (replacement === null) return null;
+    out += value.slice(index, start);
+    out += `url("${replacement.replace(/[\\"]/g, "\\$&")}")`;
+    index = token.end;
+  }
 }
 
 function sanitizeDeclaration(
