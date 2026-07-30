@@ -209,8 +209,15 @@ Goal: `createOriginProxyHandler` is one line away from being a deployable
   Config parsing is pure and unit-tested; the whole path is covered against
   Prosody in `test/e2e/cli-gateway.e2e.test.ts`. Guide:
   [gateway-cli.md](gateway-cli.md).
-- [ ] **Docker image** (S) — the CLI containerized; compose example pairing
-  it with Prosody.
+- [x] **Docker image** (S) — [`Dockerfile`](../Dockerfile): multi-stage, the
+  runtime stage installing the `npm pack` tarball so the image runs exactly what
+  `npm publish` would upload (packaging mistakes fail the build), ~170 MB on
+  `node:24-alpine`, non-root, exit codes preserved, SIGTERM closing the stream
+  cleanly without an init shim. No `HEALTHCHECK` — the gateway exposes no port,
+  so liveness needs the metrics item below.
+  [`examples/docker/`](../examples/docker/) pairs it with Prosody and an nginx
+  origin that is *not* published to the host: two commands to a browsable
+  `httpx://web.localhost/`, verified end to end.
 - [ ] **Observability** (M) — structured logs, request counters/latency
   histograms (Prometheus text endpoint), `onError` wired to logs.
 - [ ] **Static-site mode** (S) — serve a directory (the demo-site handler
@@ -218,8 +225,10 @@ Goal: `createOriginProxyHandler` is one line away from being a deployable
 - [ ] **Rate limiting** (S) — token bucket per bare JID in front of
   `authorize`.
 
-Acceptance: partly met — the CLI fronts a real site today (README quickstart is
-four commands); the Docker image and scrapeable metrics are the open items.
+Acceptance: mostly met — `docker compose up` in `examples/docker/` fronts a real
+site over XMPP (verified: nginx pages *and* nginx's own 404 travelling back to a
+client), README quickstart is four commands. Scrapeable metrics are the open
+item.
 
 ## Phase 12 — Beyond the WebExtension
 

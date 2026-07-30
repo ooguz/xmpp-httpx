@@ -1,0 +1,55 @@
+# A complete httpx deployment in three containers:
+#
+#   origin   an ordinary website (nginx) — NOT published to the host
+#   prosody  the XMPP server
+#   gateway  xmpp-httpx-gateway, owning the component web.localhost
+#
+#   docker compose up -d --wait
+#   docker compose exec prosody prosodyctl register alice localhost demo-password
+#   # then browse httpx://web.localhost/ with examples/webext
+#
+# See README.md in this directory for the full walkthrough.
+
+services:
+  origin:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+    # Deliberately no `ports:` — the origin is reachable only from the gateway,
+    # which is what makes the X-Httpx-From header trustworthy to it.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  prosody:
+    image: prosodyim/prosody:13.0
+    volumes:
+      - ./prosody.cfg.lua:/etc/prosody/prosody.cfg.lua:ro
+    ports:
+      - "5222:5222" # c2s, for a desktop XMPP client
+      - "5280:5280" # websocket, for the WebExtension browser
+    healthcheck:
+      test: ["CMD", "prosodyctl", "status"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    # Everything but the secret lives in the config file; the secret comes from
+    # the environment so it never appears in `ps` or in the image.
+    environment:
+      XMPP_HTTPX_SECRET: compose-secret
+    volumes:
+      - ./gateway.json:/etc/xmpp-httpx/gateway.json:ro
+    command: ["--config", "/etc/xmpp-httpx/gateway.json"]
+    restart: unless-stopped
+    depends_on:
+      prosody:
+        condition: service_healthy
+      origin:
+        condition: service_healthy

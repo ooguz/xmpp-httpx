@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <title>httpx over Docker</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 38rem; margin: 2rem auto }
+      h1 { border-bottom: 3px solid #1a56db; padding-bottom: 0.2rem }
+      code { background: #1a56db14; padding: 0.1rem 0.3rem; border-radius: 4px }
+    </style>
+  </head>
+  <body>
+    <h1>Served by nginx, delivered by XMPP</h1>
+    <p>
+      This page came from an ordinary nginx container. The gateway fetched it
+      over HTTP on the internal network and forwarded it to you inside XMPP
+      stanzas — no HTTP connection reached your browser.
+    </p>
+    <p><a href="about.html">About this example</a></p>
+    <p>Try <code>httpx://web.localhost/missing</code> to see a real 404 travel back.</p>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <title>About — httpx over Docker</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 38rem; margin: 2rem auto }
+      h1 { border-bottom: 3px solid #1a56db; padding-bottom: 0.2rem }
+    </style>
+  </head>
+  <body>
+    <h1>About</h1>
+    <p>
+      Three containers: <b>prosody</b> (the XMPP server), <b>origin</b> (nginx
+      serving these files), and <b>gateway</b> (xmpp-httpx-gateway, which owns
+      the component <code>web.localhost</code>).
+    </p>
+    <p>The origin is not published to the host — only the gateway can reach it.</p>
+    <p><a href="/">Home</a></p>
+  </body>
+</html>

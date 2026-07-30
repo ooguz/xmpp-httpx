@@ -1,0 +1,7 @@
+{
+  "service": "xmpp://prosody:5347",
+  "domain": "web.localhost",
+  "origin": "http://origin:80",
+  "allow": ["alice@localhost"],
+  "maxStanzaBytes": 65536
+}

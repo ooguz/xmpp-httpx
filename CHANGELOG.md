@@ -8,6 +8,10 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **Docker image** for the gateway (`Dockerfile`), plus a runnable
+  three-container compose example in `examples/docker/` (nginx origin + Prosody
+  + gateway). The runtime stage installs the `npm pack` tarball, so the image
+  runs exactly what would be published.
 - **`isStreamMechanism(value)`** exported — the guard the CLI needs to validate
   `--prefer`, useful to anyone else narrowing user input to a mechanism.
 

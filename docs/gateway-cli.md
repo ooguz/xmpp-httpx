@@ -108,6 +108,37 @@ without a global install. It needs `@xmpp/component` (or `@xmpp/client`) present
 — those are optional peers of the library, and the CLI says exactly which one to
 install if it is missing rather than printing a stack trace.
 
+## Docker
+
+The repo's [`Dockerfile`](../Dockerfile) builds the gateway as a container. Its
+build stage produces a tarball with `npm pack` and the runtime stage installs
+*that*, so the image runs the exact artifact `npm publish` would upload —
+a packaging mistake fails the build instead of shipping. `@xmpp/client` and
+`@xmpp/component` are installed alongside it, since they are optional peers of
+the library and both modes should work out of the box.
+
+```sh
+docker build -t xmpp-httpx-gateway .
+docker run --rm -e XMPP_HTTPX_SECRET=… xmpp-httpx-gateway \
+  --origin http://origin:8080 --service xmpp://prosody:5347 \
+  --domain web.example.org --allow alice@example.org
+```
+
+The image runs as the non-root `node` user, is ~170 MB on `node:24-alpine`, and
+propagates exit codes (2 for a bad configuration, 1 for a failed start) so an
+orchestrator can tell a crash from a misconfiguration. `docker stop` sends
+SIGTERM, which the CLI handles by closing the XMPP stream and exiting 0 — no
+init shim is needed even with node as PID 1, and there is no kill-timeout wait.
+
+There is no `HEALTHCHECK`: the gateway exposes no port of its own — it is an XMPP
+client, not a server — so a real liveness probe needs the metrics endpoint that
+is still a roadmap item.
+
+[`examples/docker/`](../examples/docker/) is a runnable three-container
+deployment (nginx origin + Prosody + this gateway) with the origin deliberately
+unreachable from the host, which is what makes `X-Httpx-From` trustworthy to it.
+Two commands to a browsable `httpx://web.localhost/`.
+
 ## Trying it against the repo's Prosody
 
 ```sh

@@ -1,0 +1,16 @@
+# Keep the build context small: everything the image needs is copied explicitly.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.github
+coverage
+docs
+examples
+test
+scripts
+.vitest-attachments
+**/__screenshots__
+*.log
+*.tsbuildinfo
