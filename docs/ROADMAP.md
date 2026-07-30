@@ -7,8 +7,8 @@ browser-mode CI, and the Firefox/Chromium WebExtension browser
 (`examples/webext/`) — which now renders page CSS, submits forms, caches with
 real 304 revalidation, saves downloads, and shows page titles and favicons.
 Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
-are done bar Jingle S5B; phase 11 has started with the gateway CLI
-(`xmpp-httpx-gateway`). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
+are done bar Jingle S5B; phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
+image, observability, static-site mode, rate limiting). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 
 ## Phase 7 — Release & ecosystem
@@ -234,10 +234,17 @@ Goal: `createOriginProxyHandler` is one line away from being a deployable
   costs a 304 with no body. Containment is checked twice — lexically after
   percent-decoding, then against the *real* path, since `resolve()` does not
   follow symlinks and a link out of the root would otherwise be served.
-- [ ] **Rate limiting** (S) — token bucket per bare JID in front of
-  `authorize`.
+- [x] **Rate limiting** (S) — `withRateLimit(handler, {ratePerSecond, burst})`
+  in the library (browser-safe, injectable clock), wired to the CLI's `--rate`
+  and `--burst`. Deliberately a **handler wrapper rather than an `authorize`
+  hook**, as originally filed: `AuthorizeFn` can only say yes or no and the
+  server renders a no as `forbidden`, whereas a throttled client deserves a real
+  429 with `Retry-After` — and it is no more expensive, since the server hands
+  the handler an unread body stream. Keyed on the *bare* JID (resources are free
+  to mint), with a bounded tracking map that evicts the least recently seen
+  bucket rather than growing without limit.
 
-Acceptance: met — `docker compose up` in `examples/docker/` fronts a real site
+**Phase 11 complete.** Acceptance: met — `docker compose up` in `examples/docker/` fronts a real site
 over XMPP (verified: nginx pages *and* nginx's own 404 travelling back to a
 client), the gateway container reports `(healthy)` from its own `/healthz`, and
 metrics are scrapeable. README quickstart is four commands.

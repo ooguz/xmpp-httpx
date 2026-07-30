@@ -37,6 +37,7 @@ export class Metrics {
   private readonly requests = new Map<string, { labels: Labels; count: number }>();
   private readonly denied = new Map<string, { labels: Labels; count: number }>();
   private readonly errors = new Map<string, { labels: Labels; count: number }>();
+  private readonly limited = new Map<string, { labels: Labels; count: number }>();
   private readonly buckets: readonly number[];
   private readonly bucketCounts: number[];
   private durationSum = 0;
@@ -76,6 +77,11 @@ export class Metrics {
     // Label on the *bare* JID only: a resource is unbounded cardinality, and
     // metrics are not an audit log — the request log has the full JID.
     Metrics.bump(this.denied, { jid: from.split("/")[0] ?? from });
+  }
+
+  /** A request refused by the rate limiter. Bare JID only, as with denials. */
+  recordRateLimited(from: string): void {
+    Metrics.bump(this.limited, { jid: from.split("/")[0] ?? from });
   }
 
   recordError(kind: string): void {
@@ -129,6 +135,15 @@ export class Metrics {
       "Requests refused by the authorization policy, by bare JID.",
       "counter",
       [...this.denied.values()].map((entry) => ({
+        labels: entry.labels,
+        value: entry.count,
+      })),
+    );
+    metric(
+      "httpx_gateway_rate_limited_total",
+      "Requests refused by the rate limiter, by bare JID.",
+      "counter",
+      [...this.limited.values()].map((entry) => ({
         labels: entry.labels,
         value: entry.count,
       })),

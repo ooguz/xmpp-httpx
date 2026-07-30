@@ -123,6 +123,10 @@ start. Everything can live in a JSON config file (`--config`), with
 flags > environment > file precedence. See
 [docs/gateway-cli.md](docs/gateway-cli.md).
 
+`--static <dir>` serves a directory with no HTTP origin at all; `--rate`/`--burst`
+throttle per requester (a real 429 with `Retry-After`); `--metrics-port` exposes
+Prometheus metrics and a `/healthz` probe.
+
 For a deployment, [`examples/docker/`](examples/docker/) is a three-container
 stack — nginx origin, Prosody, gateway — that goes from `docker compose up` to a
 browsable `httpx://web.localhost/` in two commands.

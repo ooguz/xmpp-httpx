@@ -226,6 +226,66 @@ describe("parseConfig — what to serve", () => {
   });
 });
 
+describe("parseConfig — rate limiting", () => {
+  it("is off unless asked for", () => {
+    const { config } = ok(BASE);
+    expect(config.ratePerSecond).toBeUndefined();
+    expect(config.burst).toBeUndefined();
+  });
+
+  it("accepts a rate, fractional included, and a burst", () => {
+    expect(ok([...BASE, "--rate", "5"]).config.ratePerSecond).toBe(5);
+    expect(ok([...BASE, "--rate", "0.5"]).config.ratePerSecond).toBe(0.5);
+    const { config } = ok([...BASE, "--rate", "5", "--burst", "20"]);
+    expect(config.burst).toBe(20);
+  });
+
+  it("rejects a rate that is not a positive number", () => {
+    for (const value of ["0", "-1", "fast", "NaN"]) {
+      expect(errors([...BASE, "--rate", value]), value).toContain(
+        `--rate needs a positive number, got "${value}"`,
+      );
+    }
+  });
+
+  it("says so when --burst would do nothing", () => {
+    expect(errors([...BASE, "--burst", "10"])).toContain(
+      "--burst has no effect without --rate",
+    );
+  });
+
+  it("reads the limiter from a config file", () => {
+    const { config } = ok([], {
+      configFile: JSON.stringify({
+        service: "xmpp://s",
+        origin: "http://o",
+        domain: "d",
+        secret: "x",
+        allow: "all",
+        ratePerSecond: 2.5,
+        burst: 7,
+      }),
+    });
+    expect(config.ratePerSecond).toBe(2.5);
+    expect(config.burst).toBe(7);
+  });
+
+  it("rejects a bad rate in the file", () => {
+    expect(
+      errors([], {
+        configFile: JSON.stringify({
+          service: "s",
+          origin: "o",
+          domain: "d",
+          secret: "x",
+          allow: "all",
+          ratePerSecond: "quick",
+        }),
+      }),
+    ).toContain('config "ratePerSecond" must be a positive number');
+  });
+});
+
 describe("parseConfig — observability", () => {
   it("defaults to text logs and no metrics listener", () => {
     const { config } = ok(BASE);

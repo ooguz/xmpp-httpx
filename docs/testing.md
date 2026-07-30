@@ -45,6 +45,11 @@ together.
   recomputation.
 - `urls.test.ts`, `errors.test.ts` — URL codec incl. browser-style relative
   resolution; stanza-condition mapping.
+- `rate-limit.test.ts` — the token bucket with a hand-moved clock: burst then
+  429, `Retry-After` never earlier than a token exists, refill capped at the
+  burst, per-bare-JID isolation (including that extra resources do *not*
+  multiply a quota), the bounded tracking map, and that the wrapped handler is
+  never reached for a refused request.
 - `cli-config.test.ts` — the gateway CLI's config layer, which is pure on
   purpose: mode validation, the refusal to start without an authorization
   decision, byte/mechanism/port parsing, and flags > env > file precedence.
@@ -108,7 +113,9 @@ round trip — the whole surface the WebExtension drives), plus
 `cli-gateway.e2e.test.ts` (the gateway CLI in front of a real HTTP origin:
 status pass-through, `X-Httpx-From`, a proxied POST body, and an unlisted JID
 refused *before* the origin is contacted) and, in the same file, a `--static`
-gateway serving a temp directory with a real 304 revalidation over the wire.
+gateway serving a temp directory with a real 304 revalidation over the wire, and
+a `--rate 1 --burst 2` gateway whose third request comes back 429 with
+`Retry-After` and recovers after a second.
 
 The static handler's path safety is tested where it can be tested honestly — on
 a real filesystem (`test/integration-node/static-site.test.ts`): percent-encoded

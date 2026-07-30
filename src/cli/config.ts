@@ -33,6 +33,10 @@ export interface GatewayConfig {
   password?: string;
   /** Bare JIDs allowed to make requests, or "all". */
   allow: Allow;
+  /** Sustained requests per second per bare JID; absent means no limit. */
+  ratePerSecond?: number;
+  /** Burst allowance for the limiter. */
+  burst?: number;
   maxStanzaBytes?: number;
   preferredStreams?: readonly StreamMechanism[];
   compress: boolean;
@@ -67,6 +71,8 @@ interface Fields {
   password?: string;
   allow?: string[];
   allowAll?: boolean;
+  ratePerSecond?: number;
+  burst?: number;
   maxStanzaBytes?: number;
   preferredStreams?: string[];
   compress?: boolean;
@@ -100,6 +106,10 @@ Required — the content to serve, one of:
 Authorization (one is required — the library denies by default):
   --allow <jid[,jid]>     bare JIDs allowed to request; repeatable
   --allow-all             serve every requester (public gateway)
+
+Rate limiting (off unless asked for; a token bucket per bare JID):
+  --rate <per-second>     sustained requests per second, may be fractional
+  --burst <n>             requests allowed at once (default: ceil(rate))
 
 Options:
   --config <file>         JSON config file; flags and env override it
@@ -135,6 +145,8 @@ const FLAGS_WITH_VALUE = new Set([
   "--max-stanza",
   "--static",
   "--static-max-age",
+  "--rate",
+  "--burst",
   "--prefer",
   "--max-body",
   "--jid-header",
@@ -216,6 +228,20 @@ function parseArgv(argv: readonly string[]): { fields: Fields; errors: string[] 
       case "--max-body": {
         const parsed = number(value!);
         if (parsed !== undefined) fields.maxRequestBodyBytes = parsed;
+        break;
+      }
+      case "--rate": {
+        const parsed = Number(value!);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          errors.push(`--rate needs a positive number, got "${value!}"`);
+        } else {
+          fields.ratePerSecond = parsed;
+        }
+        break;
+      }
+      case "--burst": {
+        const parsed = number(value!);
+        if (parsed !== undefined) fields.burst = parsed;
         break;
       }
       case "--prefer":
@@ -336,6 +362,15 @@ function parseFile(contents: string): { fields: Fields; errors: string[] } {
     }
   }
   assign(fields, "maxRequestBodyBytes", positive("maxRequestBodyBytes"));
+  assign(fields, "burst", positive("burst"));
+  const rate = source["ratePerSecond"];
+  if (rate !== undefined) {
+    if (typeof rate === "number" && Number.isFinite(rate) && rate > 0) {
+      fields.ratePerSecond = rate;
+    } else {
+      errors.push('config "ratePerSecond" must be a positive number');
+    }
+  }
   assign(fields, "compress", boolean("compress"));
   assign(fields, "followRedirects", boolean("followRedirects"));
   assign(fields, "quiet", boolean("quiet"));
@@ -442,6 +477,10 @@ export function parseConfig(inputs: ParseInputs): ParseResult {
     errors.push("no authorization given: use --allow <jid> or --allow-all");
   }
 
+  if (fields.burst !== undefined && fields.ratePerSecond === undefined) {
+    errors.push("--burst has no effect without --rate");
+  }
+
   const mechanisms: StreamMechanism[] = [];
   for (const entry of fields.preferredStreams ?? []) {
     if (isStreamMechanism(entry)) mechanisms.push(entry);
@@ -480,6 +519,10 @@ export function parseConfig(inputs: ParseInputs): ParseResult {
     ...(fields.maxRequestBodyBytes !== undefined
       ? { maxRequestBodyBytes: fields.maxRequestBodyBytes }
       : {}),
+    ...(fields.ratePerSecond !== undefined
+      ? { ratePerSecond: fields.ratePerSecond }
+      : {}),
+    ...(fields.burst !== undefined ? { burst: fields.burst } : {}),
     ...(mechanisms.length > 0 ? { preferredStreams: mechanisms } : {}),
   };
 

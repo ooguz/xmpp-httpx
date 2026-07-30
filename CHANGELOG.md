@@ -8,6 +8,9 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **`withRateLimit(handler, options)`**: per-bare-JID token bucket, exported from
+  the library and wired to the CLI's `--rate`/`--burst`. Throttled requests get a
+  real 429 with `Retry-After` (not a 403), and never reach the origin.
 - **Static-site mode** for the gateway: `--static <dir>` serves a directory
   directly, with no HTTP origin — validators for cheap 304s, streamed bodies,
   and containment checked twice (lexically and against the real path, so a

@@ -13,3 +13,8 @@ export {
   presencePolicy,
   type AuthorizeFn,
 } from "./policy.js";
+export {
+  bareJid,
+  withRateLimit,
+  type RateLimitOptions,
+} from "./rate-limit.js";

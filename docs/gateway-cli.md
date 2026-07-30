@@ -140,6 +140,54 @@ Path safety is checked twice, because request paths come off the network:
    served, and the check compares real paths on both sides so a root under a
    symlinked parent (`/tmp` -> `/private/tmp`) still works.
 
+## Rate limiting
+
+Off unless asked for. `--rate <per-second>` gives each **bare JID** a token
+bucket; `--burst <n>` sets how many requests may arrive at once (default
+`ceil(rate)`):
+
+```sh
+xmpp-httpx-gateway --static /srv/site --service ... --domain ... --allow-all \
+  --rate 5 --burst 20
+```
+
+A throttled request gets a real **429 with `Retry-After`**, not a 403:
+
+```
+#1 -> 200
+#2 -> 200
+#3 -> 429 retry-after=1   rate limit exceeded; retry in 1s
+```
+
+Three details worth knowing:
+
+- **It is a handler wrapper, not an `authorize` hook**, even though the roadmap
+  filed it under "in front of authorize". `AuthorizeFn` can only say yes or no,
+  and the server renders a no as `forbidden` — but a throttled client should be
+  told to slow down and when to come back, which only a 429 with `Retry-After`
+  can express. It costs nothing extra: the server hands the handler an *unread*
+  body stream, so refusing here still skips both the origin call and reading the
+  request.
+- **The bucket is keyed on the bare JID.** Resources are free to mint, so
+  limiting `alice@example.org/laptop` separately from `/phone` would let one
+  account multiply its own quota at will.
+- **The tracking map is bounded** (`maxTracked`, 10 000 by default). When it is
+  full the least recently seen bucket is dropped, which at worst gives that
+  sender a fresh allowance — never an error, and never unbounded growth from a
+  flood of distinct senders.
+
+Refusals are logged and counted (`httpx_gateway_rate_limited_total`, by bare
+JID), and because a 429 *is* a response it also lands in
+`httpx_gateway_requests_total{status="429"}`.
+
+The limiter is exported for anyone building their own server, not just the CLI:
+
+```js
+import { HttpxServer, withRateLimit } from "xmpp-httpx";
+
+server.handle(withRateLimit(myHandler, { ratePerSecond: 5, burst: 20 }));
+```
+
 ## Observability
 
 ### Logs

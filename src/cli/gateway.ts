@@ -1,5 +1,6 @@
 import { createOriginProxyHandler } from "../node/origin-proxy.js";
 import { allowAll, allowList, type AuthorizeFn } from "../server/policy.js";
+import { withRateLimit } from "../server/rate-limit.js";
 import { HttpxServer } from "../server/server.js";
 import type { XmppSession } from "../session.js";
 import { stanzaBudgets } from "../transport/select.js";
@@ -174,12 +175,27 @@ export async function startGateway(
 
   // Either shape ends up as one HttpxHandler; everything downstream — logging,
   // metrics, error mapping — is identical.
-  const handler =
+  const content =
     config.staticRoot !== undefined
       ? createStaticHandler(config.staticRoot, { maxAgeSeconds: config.staticMaxAge })
       : createOriginProxyHandler(config.origin!, {
           followRedirects: config.followRedirects,
           jidHeader: config.jidHeader,
+        });
+
+  // Wrapped *outside* the content handler, so a throttled request never reaches
+  // the origin or the disk — and its 429 is still counted and logged like any
+  // other response, since it is one.
+  const handler =
+    config.ratePerSecond === undefined
+      ? content
+      : withRateLimit(content, {
+          ratePerSecond: config.ratePerSecond,
+          ...(config.burst !== undefined ? { burst: config.burst } : {}),
+          onLimited: (from, retryAfter) => {
+            metrics.recordRateLimited(from);
+            log.error(`rate limited ${from}, retry in ${retryAfter}s`);
+          },
         });
 
   server.handle(async (req) => {
@@ -222,7 +238,8 @@ export async function startGateway(
   metrics.setStreamUp(true);
   log.info(
     `serving ${config.staticRoot ?? config.origin!} as httpx://${jid}/ ` +
-      `(${config.allow === "all" ? "open to all" : `${config.allow.length} allowed JID(s)`})`,
+      `(${config.allow === "all" ? "open to all" : `${config.allow.length} allowed JID(s)`}` +
+      `${config.ratePerSecond === undefined ? "" : `, ${config.ratePerSecond}/s per JID`})`,
   );
 
   return {

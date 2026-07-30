@@ -246,3 +246,87 @@ describe("gateway CLI serving a directory (--static)", () => {
     expect(await traversal.text()).not.toContain("root:");
   });
 });
+
+describe("gateway CLI rate limiting (--rate)", () => {
+  let root: string;
+  let gateway: RunningGateway;
+  let alice: E2eClient;
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "httpx-rate-e2e-"));
+    await writeFile(join(root, "index.html"), "<h1>rate limited site</h1>");
+
+    const parsed = parseConfig({
+      argv: [
+        "--static",
+        root,
+        "--service",
+        "xmpp://localhost:15347",
+        "--domain",
+        GATEWAY_JID,
+        "--allow-all",
+        "--rate",
+        "1",
+        "--burst",
+        "2",
+        "--metrics-port",
+        String(METRICS_PORT + 1),
+        "--quiet",
+      ],
+      env: { XMPP_HTTPX_SECRET: "e2e-secret" },
+    });
+    if (parsed.kind !== "config") {
+      throw new Error(`config rejected: ${JSON.stringify(parsed)}`);
+    }
+    gateway = await startGateway(parsed.config, {
+      info: () => {},
+      error: () => {}, // refusals log at error level; expected here
+      request: () => {},
+    });
+    alice = await connectUser("alice", "e2e-alice", "rate-client");
+  });
+
+  afterAll(async () => {
+    await alice?.stop();
+    await gateway?.stop();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const get = () =>
+    httpxFetch(`httpx://${GATEWAY_JID}/`, { session: alice.session });
+
+  it("serves the burst, then answers 429 with Retry-After", async () => {
+    const statuses: number[] = [];
+    let retryAfter: string | null = null;
+    for (let i = 0; i < 4; i++) {
+      const response = await get();
+      statuses.push(response.status);
+      if (response.status === 429) retryAfter = response.headers.get("retry-after");
+      await response.text();
+    }
+
+    // burst=2 at 1/s: the first two pass, the rest are refused (the whole
+    // exchange takes far less than the second it would take to refill).
+    expect(statuses.slice(0, 2)).toEqual([200, 200]);
+    expect(statuses.slice(2)).toEqual([429, 429]);
+    expect(retryAfter).toBe("1");
+  });
+
+  it("lets the client back in once a token has refilled", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const response = await get();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("rate limited site");
+  });
+
+  it("counts the refusals in its metrics", async () => {
+    const body = await (
+      await fetch(`http://127.0.0.1:${gateway.metricsPort!}/metrics`)
+    ).text();
+    expect(body).toMatch(
+      /httpx_gateway_rate_limited_total\{jid="alice@localhost"\} [1-9]/,
+    );
+    // A 429 is a response like any other, so it lands in the usual counter too.
+    expect(body).toMatch(/httpx_gateway_requests_total\{method="GET",status="429"\} [1-9]/);
+  });
+});
