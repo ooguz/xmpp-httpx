@@ -1,11 +1,14 @@
 # Roadmap — next possible phases and tasks
 
-Status today (v0.5.0, 2026-07-07): the library implements **all seven
-XEP-0332 body transports** with client + server, discovery + entity caps,
-a Prosody E2E suite, browser-mode CI, and a working Firefox/Chromium
-WebExtension browser (`examples/webext/`). Rounds 1–2 (phases 1–6) are done;
-this file plans what comes after. Effort sizing: **S** ≤ half a day,
-**M** ≈ 1–3 days, **L** ≈ a week+.
+Status today (v0.6.0 + phase 10 work, 2026-07-30): the library implements
+**all seven XEP-0332 body transports** with client + server, discovery +
+entity caps, SOCKS5 bytestreams, Content-Encoding, a Prosody E2E suite,
+browser-mode CI, and the Firefox/Chromium WebExtension browser
+(`examples/webext/`) — which now renders page CSS, submits forms, caches with
+real 304 revalidation, saves downloads, and shows page titles and favicons.
+Phases 1–6 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9 are
+done bar Jingle S5B. Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
+**L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 
 ## Phase 7 — Release & ecosystem
 
@@ -100,7 +103,8 @@ Goal: trust the implementation under adversarial and heavy load.
 
 Acceptance: fuzz + adversarial suites green in CI (done); published
 benchmark numbers (done, mock-pair only); no O(body) memory paths (done);
-security review still open.
+security review done (two findings, both fixed) — an outside reviewer on the
+sandbox/rendering reasoning remains the one thing self-review cannot supply.
 
 ## Phase 10 — Browser extension v2
 
@@ -114,8 +118,16 @@ Goal: from demo to daily-drivable.
   webfonts served over XMPP actually render. Tested in real Chromium
   (`test/browser/`); reasoning in [browser-extension.md](browser-extension.md)
   §CSS.
-- [ ] **Progressive rendering** (M) — render HTML as it streams (the body is
-  already a stream; today the extension buffers `text()` first).
+- [ ] **Progressive rendering** (M) — **deliberately deferred**, and it needs
+  a different design than "render HTML as it streams". The pipeline's safety
+  comes from sanitizing a *complete* document (`WHOLE_DOCUMENT` DOMPurify, then
+  one CSSOM pass, then one `srcdoc` assignment); partial markup is exactly
+  where mXSS lives, and re-sanitizing a growing buffer on every chunk is
+  O(n²) plus visible reflow. What is achievable without weakening that: stream
+  the body with byte-progress feedback in the chrome, then render once. That is
+  a UX task, not the streaming-HTML task the item's title implies — worth
+  splitting before either is picked up. Note the cache layer buffers bodies
+  too (`blob()`), so progress reporting has to be plumbed through it.
 - [x] **Forms** (M) — GET and `application/x-www-form-urlencoded` POST forms
   (`examples/webext/src/forms.ts`). Submission is driven from control clicks
   and Enter-key implicit submission, *not* a `submit` listener: the sandbox has
@@ -138,11 +150,22 @@ Goal: from demo to daily-drivable.
 - [x] **Page metadata** (S) — title and favicon from the fetched document
   (icon fetched over httpx into a blob URL), plus scriptless error pages with
   working *Retry* / *Connection settings* actions.
-- [ ] **Store packaging** (M) — AMO signing + Chrome Web Store zip via
-  `web-ext build`; the data-consent manifest key Firefox now warns about.
-- [ ] **`web+httpx` site handler research** (S) — a small companion website
-  calling `registerProtocolHandler("web+httpx", …)` so links work even
-  without protocol_handlers support.
+- [~] **Store packaging** (M) — `npm run package` in `examples/webext/` builds
+  both store zips into `dist/artifacts/` via `web-ext build`, and the Firefox
+  data-consent key is declared (`data_collection_permissions: {required:
+  ["none"]}`), which raised `strict_min_version` to 142 — the key landed in
+  Firefox 140/142-Android, not because the extension needs anything that new.
+  `web-ext lint` is down to a single acknowledged warning (the sanitized
+  `srcdoc` assignment). **Owner-blocked**: AMO signing and Web Store upload
+  need publisher credentials — see [RELEASING.md](../RELEASING.md).
+- [x] **`web+httpx` site handler research** (S) —
+  [web-httpx-handler.md](web-httpx-handler.md). Conclusion: `httpx:` itself can
+  never be registered (the `registerProtocolHandler` safelist is fixed by
+  spec), `web+httpx` can, but it lands on a *web page* that has no access to
+  the user's account — so its only honest job is handing off to the extension
+  and explaining itself when the extension is missing. Worth building with
+  store publication, not before; it needs a published extension ID to hand off
+  to on Chromium.
 
 The demo site (`test/e2e/demo-site.ts`, served by `scripts/demo-gateway.mjs`)
 now exercises the shipped surface: a `<style>` block with a CSS background

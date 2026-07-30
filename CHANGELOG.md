@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Library: no API changes. Packaging/tooling fixes only —
+
+- **`npm run build` and `npm run lint` were broken** and would have failed CI:
+  `tsconfig.build.json` never saw the Node types `src/node/socks5.ts` needs
+  (they reached `npm run typecheck` only via vitest's config types), and
+  `scripts/memcheck.mjs` had unused imports plus globals missing from the
+  eslint scripts override. Both fixed; `docs/api/` is now eslint-ignored so a
+  local `npm run docs:api` doesn't make lint diverge from CI.
+
+The bundled example browser (`examples/webext/`, not published to npm) gained
+page CSS, forms, caching, downloads, and page metadata — see
+[docs/ROADMAP.md](docs/ROADMAP.md) phase 10 and
+[docs/browser-extension.md](docs/browser-extension.md).
+
 ## 0.6.0 — 2026-07-07
 
 - **Content-Encoding**: transparent gzip/deflate via

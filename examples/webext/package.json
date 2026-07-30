@@ -10,6 +10,7 @@
     "build": "npm run build:lib && vite build && node scripts/make-manifests.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "web-ext lint --source-dir dist/firefox",
+    "package": "npm run build && web-ext build --source-dir dist/firefox --artifacts-dir dist/artifacts --filename httpx-browser-firefox-{version}.zip --overwrite-dest && web-ext build --source-dir dist/chromium --artifacts-dir dist/artifacts --filename httpx-browser-chromium-{version}.zip --overwrite-dest",
     "dev:firefox": "web-ext run --source-dir dist/firefox",
     "dev:chromium": "echo 'Load dist/chromium via chrome://extensions → Load unpacked'"
   },

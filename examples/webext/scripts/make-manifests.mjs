@@ -20,7 +20,16 @@ const targets = {
     browser_specific_settings: {
       gecko: {
         id: "httpx-browser@xmpp-httpx.example",
-        strict_min_version: "128.0",
+        // 142, not 128: the data-consent key below landed in Firefox 140
+        // (142 on Android), and AMO now requires it for new submissions. The
+        // extension's own floor is lower — FormData's submitter argument
+        // (121) is the newest API it needs — so this is a packaging
+        // requirement, not a capability one.
+        strict_min_version: "142.0",
+        // Nothing is collected or transmitted anywhere except the XMPP account
+        // the user configures: credentials stay in storage.local, and no
+        // telemetry, analytics, or remote endpoint exists in the code.
+        data_collection_permissions: { required: ["none"] },
       },
     },
     protocol_handlers: [
