@@ -8,7 +8,8 @@ browser-mode CI, and the Firefox/Chromium WebExtension browser
 real 304 revalidation, saves downloads, and shows page titles and favicons.
 Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
 are done bar Jingle S5B; phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
-image, observability, static-site mode, rate limiting). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
+image, observability, static-site mode, rate limiting); phase 12 is done (the
+Electron shell, with OS-handler and mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 
 ## Phase 7 — Release & ecosystem
@@ -249,17 +250,38 @@ over XMPP (verified: nginx pages *and* nginx's own 404 travelling back to a
 client), the gateway container reports `(healthy)` from its own `/healthz`, and
 metrics are scrapeable. README quickstart is four commands.
 
-## Phase 12 — Beyond the WebExtension
+## Phase 12 — Beyond the WebExtension — **done**
 
-Goal: a real `httpx://` address bar somewhere.
+Goal: a real `httpx://` address bar somewhere. Met: `examples/electron/` puts
+`httpx://` in a genuine address bar, and the remaining reach (OS registration,
+mobile) is researched and written down rather than guessed at.
 
-- [ ] **Electron shell** (L) — `protocol.handle("httpx", …)` gives genuine
-  scheme registration; reuse the extension's rendering pipeline, gain real
-  chrome (tabs, downloads) for free.
-- [ ] **OS-level handler research** (S) — desktop `.desktop`/registry
-  handlers for `httpx:` launching the Electron shell.
-- [ ] **Mobile feasibility note** (S) — React Native support of xmpp.js +
-  this library (document, don't build).
+- [x] **Electron shell** (L) — `examples/electron/`: `protocol.handle("httpx", …)`
+  makes the scheme Chromium's own, so the address bar, history, forms, downloads
+  and — the real prize — **subresource fetching** all come for free; the
+  extension's blob-URL rewriting simply is not needed. Tabs are sandboxed
+  `WebContentsView`s with no preload; the chrome is a separate view with a
+  narrow `contextBridge`; scripts are off via a CSP the handler imposes over the
+  server's. Run under Xvfb against the demo gateway: page, CSS, image and a
+  second-instance tab all verified.
+  **The finding that shaped it:** a `Request` URL cannot carry credentials (Fetch
+  standard, not scheme-specific), so `httpx://alice@example.org/` can never reach
+  a `protocol.handle` handler — account JIDs ride encoded in the host, component
+  domains need nothing. Reasoning in [electron-shell.md](electron-shell.md).
+- [x] **OS-level handler research** (S) —
+  [os-scheme-handlers.md](os-scheme-handlers.md): the `.desktop` MimeType, the
+  Windows `URL Protocol` key and the macOS `CFBundleURLTypes` plist, plus why
+  none is wired up yet (all three want a *packaged* app). The shell side is
+  already done and verified — argv on first launch, `second-instance` for a
+  repeat launch, `open-url` for macOS — and the note covers the security
+  question a registration raises: any web page can then hand the app a URL.
+- [x] **Mobile feasibility note** (S) —
+  [mobile-feasibility.md](mobile-feasibility.md): the library itself needs only
+  polyfills (`ReadableStream`, `crypto.subtle`, no `CompressionStream`), `wss://`
+  works while raw TCP and therefore SOCKS5 do not, and the actual blocker is
+  rendering — a real mobile browser means `WKURLSchemeHandler` on iOS and
+  `shouldInterceptRequest` on Android, i.e. native work per platform. Nothing in
+  the library needs to change, which is the useful conclusion.
 
 ## Cross-cutting quick wins (any time)
 

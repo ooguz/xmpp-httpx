@@ -8,6 +8,9 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **Desktop shell** (`examples/electron/`): `httpx://` registered as a real
+  scheme via `protocol.handle`, so Chromium fetches pages *and subresources*
+  itself. Not published to npm — an example, like the WebExtension.
 - **`xmpp-httpx/testing`**: the in-memory session-pair harness this library's own
   integration suite runs on is now a published subpath (`createSessionPair`,
   `MockSession`, and the `deliverHook` fault-injection seam), so downstream

@@ -224,6 +224,13 @@ was a CI-only failure until the alias moved.
   exercises; chunkedBase64 has no protocol acks and is bounded instead by
   the receiver's `maxBufferedBytes` cap.
 
+The Electron shell's protocol handler is tested the same way, in
+`test/integration/electron-protocol.test.ts`: it is a `Request` → `Response`
+function on purpose, so the session pair covers the URL encoding round trip, the
+CSP a page cannot loosen, header/body forwarding and the error pages — with no
+Electron and no display involved. The windowed shell is verified by hand under
+Xvfb (see [electron-shell.md](electron-shell.md)); no CI job has a display.
+
 ## Browser smoke test (`npm run smoke`)
 
 `scripts/smoke-browser.mjs` drives the **built** extension page in real Chromium

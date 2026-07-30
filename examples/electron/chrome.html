@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>httpx</title>
+    <link rel="stylesheet" href="chrome.css" />
+  </head>
+  <body>
+    <nav id="tabstrip">
+      <ul id="tabs"></ul>
+      <button id="newTab" title="New tab" aria-label="New tab">+</button>
+    </nav>
+
+    <header id="bar">
+      <button id="back" title="Back" aria-label="Back">←</button>
+      <button id="forward" title="Forward" aria-label="Forward">→</button>
+      <button id="reload" title="Reload" aria-label="Reload">⟳</button>
+      <form id="nav">
+        <input id="address" type="text" spellcheck="false" autocomplete="off"
+               placeholder="httpx://web.example.org/ or alice@example.org/page" />
+      </form>
+      <span id="status" class="chip" data-state="offline">offline</span>
+      <button id="settingsBtn" title="Connection settings" aria-label="Settings">⚙</button>
+    </header>
+
+    <dialog id="settings">
+      <form id="settingsForm" method="dialog">
+        <h2>XMPP connection</h2>
+        <label>WebSocket service
+          <input id="service" type="text" placeholder="ws://localhost:15280/xmpp-websocket" required />
+        </label>
+        <label>JID <input id="jid" type="text" placeholder="alice@localhost" required /></label>
+        <label>Password <input id="password" type="password" /></label>
+        <p class="warning">Demo-grade: credentials are stored in plaintext under the app's user-data directory.</p>
+        <p id="settingsError" class="error" hidden></p>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button value="connect" id="connectBtn">Save &amp; connect</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="chrome.js"></script>
+  </body>
+</html>

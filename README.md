@@ -18,6 +18,7 @@ XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implemen
 | [docs/protocol-notes.md](docs/protocol-notes.md) | Every decision made where the spec is ambiguous — the interop anchor |
 | [docs/testing.md](docs/testing.md) | The three vitest projects, mock-session harness, Prosody E2E, CI |
 | [docs/browser-extension.md](docs/browser-extension.md) | WebExtension architecture: connection placement, rendering pipeline, tabs, manifest strategy |
+| [docs/electron-shell.md](docs/electron-shell.md) | The desktop shell: `httpx://` as a scheme Chromium fetches, and why that changes the design |
 | [docs/gateway-cli.md](docs/gateway-cli.md) | `xmpp-httpx-gateway`: put an existing HTTP origin on XMPP, by hand or in Docker |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Next phases and tasks (release, hardening, extension v2, gateway product) |
 | [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | Implementation-experience write-up for the XSF standards process |
@@ -160,13 +161,30 @@ const [clientSession, serverSession] = createSessionPair("alice@example.org/pc",
 
 [`examples/webext/`](examples/webext/) is a working **WebExtension for Firefox and Chromium** that navigates `httpx://` URLs with this library: tabs with per-tab history, an address bar, a history/bookmarks drawer, an omnibox keyword (`httpx server@example.org/page` ⏎), clickable `ext+httpx://` links on Firefox, and a sanitized rendering pipeline (DOMPurify + a CSSOM CSS sanitizer → blob-URL subresources → script-less sandboxed iframe) with forms, downloads, page titles/favicons and an HTTP cache doing real 304 revalidation. See its README for build/run instructions, `scripts/demo-gateway.mjs` for a demo site to browse, and `npm run smoke` to drive the whole thing in real Chromium.
 
+## The desktop shell
+
+[`examples/electron/`](examples/electron/) goes further than the extension can:
+`protocol.handle("httpx", …)` makes `httpx://` a scheme **Chromium itself
+fetches**, so the address bar is real and subresources, forms, history and
+downloads work as they do for http — no blob-URL rewriting anywhere.
+
+```sh
+cd examples/electron && npm install && npm start
+```
+
+Page scripts are off by default (a CSP the protocol handler imposes over the
+server's), content lives in sandboxed views with no preload, and account JIDs are
+encoded into the host because a `Request` URL cannot carry credentials. See
+[docs/electron-shell.md](docs/electron-shell.md).
+
 ## Roadmap
 
-Done so far: the protocol with all seven transports, the browser extension, and
-the gateway (CLI, Docker image, metrics, static-site mode, rate limiting). Next:
+Done so far: the protocol with all seven transports, the browser extension, the
+gateway (CLI, Docker image, metrics, static-site mode, rate limiting) and the
+desktop shell. Next:
 
-- An Electron shell, for a real `httpx://` address bar rather than an extension page
 - Jingle S5B (XEP-0260) transport candidate negotiation
+- Packaging the shell, which is what an OS-level `httpx:` registration needs
 - Publishing to npm and the extension stores
 
 Full detail, including everything already finished, in [docs/ROADMAP.md](docs/ROADMAP.md).

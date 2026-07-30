@@ -1,0 +1,26 @@
+{
+  "name": "httpx-electron-shell",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop shell with a real httpx:// address bar (XEP-0332)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build:lib": "npm --prefix ../.. run build",
+    "build": "npm run build:lib && tsc -p tsconfig.json && node -e \"require('fs').renameSync('dist/preload.js','dist/preload.mjs')\"",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xmpp/client": "^0.14.0",
+    "xmpp-httpx": "file:../.."
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "typescript": "^6.0.3"
+  },
+  "allowScripts": {
+    "electron@38.8.6": true
+  }
+}

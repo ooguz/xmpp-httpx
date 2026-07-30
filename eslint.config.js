@@ -52,6 +52,18 @@ export default tseslint.config(
     },
   },
   {
+    // examples/electron/chrome.js is the shell's chrome renderer: a plain
+    // browser script loaded straight from disk (nothing to build), so it gets
+    // browser globals and the `httpx` bridge the preload exposes.
+    files: ["examples/electron/chrome.js"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        window: "readonly",
+      },
+    },
+  },
+  {
     // Standalone runtime scripts (demo gateway, manifest packaging).
     files: ["scripts/**/*.mjs", "examples/*/scripts/**/*.mjs"],
     languageOptions: {

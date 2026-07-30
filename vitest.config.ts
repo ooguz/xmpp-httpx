@@ -14,12 +14,13 @@ const BROWSER_SAFE = [
 const NODE_ONLY = ["test/integration-node/**/*.test.ts"];
 const BROWSER_ONLY = ["test/browser/**/*.test.ts"];
 
-// The webext sources under test import the library by package name (the example
-// links it with `file:../..`); map it to the sources so the browser tests need
-// no install inside the example and no built dist/. This must live on the
-// *project* config — `test.projects` entries do not inherit a root-level
-// `resolve`, and the example's own node_modules would otherwise mask that.
-const WEBEXT_ALIAS = {
+// The example sources under test (webext, electron) import the library by
+// package name, since each example links it with `file:../..`; map it to the
+// sources so the suites need no install inside an example and no built dist/.
+// This must live on the *project* config — `test.projects` entries do not
+// inherit a root-level `resolve`, and an example's own node_modules would
+// otherwise mask that (it did: a CI-only failure until the alias moved).
+const EXAMPLE_ALIAS = {
   resolve: {
     alias: [
       {
@@ -35,6 +36,7 @@ export default defineConfig({
     testTimeout: 10_000,
     projects: [
       {
+        ...EXAMPLE_ALIAS,
         test: {
           name: "node",
           environment: "node",
@@ -45,7 +47,7 @@ export default defineConfig({
         },
       },
       {
-        ...WEBEXT_ALIAS,
+        ...EXAMPLE_ALIAS,
         test: {
           name: "browser",
           include: [...BROWSER_SAFE, ...BROWSER_ONLY],
