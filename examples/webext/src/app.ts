@@ -1,4 +1,5 @@
 import { httpxFetch, parseHttpxUrl } from "xmpp-httpx";
+import { cachedFetch, clearCache, invalidate, type CacheState } from "./cache.js";
 import { Connection } from "./connection.js";
 import { filenameFor, isAttachment, isRenderableType, saveBlob } from "./download.js";
 import type { FormRefusal, FormSubmission } from "./forms.js";
@@ -13,6 +14,7 @@ const address = $<HTMLInputElement>("address");
 const viewport = $<HTMLIFrameElement>("viewport");
 const status = $<HTMLSpanElement>("status");
 const settingsDialog = $<HTMLDialogElement>("settings");
+const cacheChip = $<HTMLSpanElement>("cacheState");
 const favicon = $<HTMLLinkElement>("favicon");
 const DEFAULT_FAVICON = favicon.getAttribute("href") ?? "";
 
@@ -44,10 +46,65 @@ function normalizeUrl(raw: string): string {
 }
 
 const fetchResource = async (resourceUrl: string): Promise<Blob> => {
-  const response = await httpxFetch(resourceUrl, { session: connection.session });
+  const { response } = await cachedFetch(resourceUrl, (headers) =>
+    httpxFetch(resourceUrl, {
+      session: connection.session,
+      ...(headers ? { headers } : {}),
+    }),
+  );
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.blob();
 };
+
+/**
+ * GETs go through the HTTP cache; POSTs bypass it and invalidate the entry for
+ * the URL they targeted, the way browsers treat unsafe methods.
+ */
+async function fetchThroughCache(
+  href: string,
+  init: { method?: "GET" | "POST"; body?: URLSearchParams; reload?: boolean },
+): Promise<Response> {
+  const request = (headers?: Record<string, string>): Promise<Response> =>
+    httpxFetch(href, {
+      session: connection.session,
+      ...(init.method ? { method: init.method } : {}),
+      ...(init.body ? { body: init.body } : {}),
+      ...(headers ? { headers } : {}),
+    });
+
+  if (init.method === "POST") {
+    const response = await request();
+    await invalidate(href);
+    showCacheState("bypass");
+    return response;
+  }
+
+  const { response, state } = await cachedFetch(href, request, {
+    ...(init.reload ? { reload: true } : {}),
+  });
+  showCacheState(state);
+  return response;
+}
+
+const CACHE_LABELS: Record<CacheState, string> = {
+  hit: "cache",
+  revalidated: "304",
+  miss: "network",
+  bypass: "",
+};
+
+function showCacheState(state: CacheState): void {
+  const label = CACHE_LABELS[state];
+  cacheChip.textContent = label;
+  cacheChip.dataset["state"] = state;
+  cacheChip.hidden = label === "";
+  cacheChip.title =
+    state === "hit"
+      ? "Served from the local cache without contacting the server"
+      : state === "revalidated"
+        ? "Server confirmed the cached copy with a 304"
+        : "Fetched over XMPP";
+}
 
 async function navigate(rawUrl: string): Promise<void> {
   const url = normalizeUrl(rawUrl);
@@ -97,17 +154,17 @@ async function navigate(rawUrl: string): Promise<void> {
  */
 async function load(
   href: string,
-  init: { method?: "GET" | "POST"; body?: URLSearchParams } = {},
+  init: {
+    method?: "GET" | "POST";
+    body?: URLSearchParams;
+    reload?: boolean;
+  } = {},
 ): Promise<void> {
   resetPage(href);
   address.value = href;
 
   try {
-    const response = await httpxFetch(href, {
-      session: connection.session,
-      ...(init.method ? { method: init.method } : {}),
-      ...(init.body ? { body: init.body } : {}),
-    });
+    const response = await fetchThroughCache(href, init);
     const contentType = response.headers.get("content-type") ?? "";
     const disposition = response.headers.get("content-disposition");
 
@@ -244,7 +301,13 @@ $<HTMLFormElement>("nav").addEventListener("submit", (event) => {
 $<HTMLButtonElement>("back").addEventListener("click", () => history.back());
 $<HTMLButtonElement>("forward").addEventListener("click", () => history.forward());
 $<HTMLButtonElement>("reload").addEventListener("click", () => {
-  void navigate(window.location.hash.slice(1));
+  // Reload skips the freshness check but still revalidates: an unchanged page
+  // costs one 304 instead of a whole body.
+  const current = window.location.hash.slice(1);
+  if (current) void load(parseHttpxUrl(normalizeUrl(current)).href, { reload: true });
+});
+$<HTMLButtonElement>("clearCache").addEventListener("click", () => {
+  void clearCache().then(() => showCacheState("bypass"));
 });
 $<HTMLButtonElement>("settingsBtn").addEventListener("click", () => {
   settingsDialog.showModal();

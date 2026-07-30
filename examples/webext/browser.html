@@ -26,7 +26,8 @@
           placeholder="httpx://webserver@example.org/index.html"
         />
       </form>
-      <span id="status" data-state="disconnected" title="XMPP connection">offline</span>
+      <span id="cacheState" class="chip" hidden></span>
+      <span id="status" class="chip" data-state="disconnected" title="XMPP connection">offline</span>
       <button id="settingsBtn" title="Connection settings" aria-label="Settings">⚙</button>
     </header>
 
@@ -49,6 +50,7 @@
           Demo-grade: credentials are kept in extension storage in plaintext.
         </p>
         <menu>
+          <button value="cache" id="clearCache" type="button">Clear cache</button>
           <button value="cancel">Cancel</button>
           <button value="connect" id="connectBtn">Save &amp; connect</button>
         </menu>

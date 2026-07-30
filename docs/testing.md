@@ -93,7 +93,9 @@ Suites: `c2s-roundtrip.e2e.test.ts` (inline/IBB/chunked/sipub/jingle bodies
 between two real users — the sipub/jingle cases connect extra `bob`
 resources because one session supports one `HttpxServer`) and
 `component-gateway.e2e.test.ts` (`httpxFetch` → XEP-0114 component serving
-`demo-site.ts`).
+`demo-site.ts`: pages, an image, a 404, a GET form query, a urlencoded POST
+body with non-ASCII text, an attachment, and an `If-None-Match` → **304**
+round trip — the whole surface the WebExtension drives).
 
 ## Browser-only suites (`test/browser/`)
 
@@ -120,6 +122,11 @@ browser-API code, so it is tested in real Chromium rather than by hand:
 - `forms.test.ts` — action resolution, the three refusal cases, submitter
   overrides stripped, GET query construction, urlencoded POST bodies, and
   which controls submit (`<button>` yes, `type=button`/`reset` no).
+- `cache.test.ts` — the HTTP cache against a scripted server: freshness
+  arithmetic (`max-age` + `Age`, `Expires`, `no-cache`), storability rules,
+  `If-None-Match`/`If-Modified-Since` revalidation returning a 304 and the
+  cached body, lifetime refreshed from the 304's headers, body replacement,
+  invalidation, and recovery from a 304 with nothing cached.
 
 These import `examples/webext/src/*` directly; `vitest.config.ts` aliases the
 `xmpp-httpx` package specifier (the example consumes the library by name) to

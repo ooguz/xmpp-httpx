@@ -114,9 +114,13 @@ Goal: from demo to daily-drivable.
   no `allow-forms` and Chromium checks that flag before dispatching the event,
   so widening the sandbox was the only alternative — declined. Uploads,
   multipart, and non-httpx actions are refused with an explanation.
-- [ ] **Caching** (M) — Cache API keyed by httpx URL honoring
-  `Cache-Control`/`ETag`, with `If-None-Match` revalidation → real 304 flow
-  end-to-end.
+- [x] **Caching** (M) — Cache API keyed by httpx URL
+  (`examples/webext/src/cache.ts`): `no-store`/`no-cache`/`max-age`/`Expires`/
+  `Age` freshness, `If-None-Match`/`If-Modified-Since` revalidation, POST
+  invalidating the entry it targeted, reload forcing revalidation, and a
+  `cache`/`304`/`network` chip in the chrome. The demo site now serves ETags
+  and answers `If-None-Match` with a real 304, covered end-to-end against
+  Prosody.
 - [ ] **Tab strip + history UI** (M) — multiple pages per window, a
   history/bookmarks drawer backed by `storage.local`.
 - [x] **Downloads** (S) — non-renderable content types (and any

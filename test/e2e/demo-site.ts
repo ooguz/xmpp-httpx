@@ -92,6 +92,19 @@ async function readBody(req: HttpxServerRequest): Promise<string> {
 
 const HTML_HEADERS = { "content-type": "text/html; charset=utf-8" };
 
+/**
+ * A weak-but-stable validator over the body, so the demo exercises the
+ * browser's `If-None-Match` → 304 path for real.
+ */
+export function etagFor(body: string | Uint8Array): string {
+  const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash = ((hash ^ byte) * 0x01000193) >>> 0;
+  }
+  return `"${bytes.length.toString(16)}-${hash.toString(16)}"`;
+}
+
 export const demoSiteHandler: HttpxHandler = async (req) => {
   const [path = "/", query = ""] = req.resource.split("?", 2);
 
@@ -135,9 +148,16 @@ export const demoSiteHandler: HttpxHandler = async (req) => {
   if (!found) {
     return { status: 404, statusMessage: "Not Found", body: "not found" };
   }
-  return {
-    status: 200,
-    headers: { "content-type": found.type },
-    body: found.body,
+
+  // Static pages carry validators, so a browser cache can revalidate them.
+  const etag = etagFor(found.body);
+  const headers = {
+    "content-type": found.type,
+    etag,
+    "cache-control": "max-age=30",
   };
+  if (req.headers.get("if-none-match") === etag) {
+    return { status: 304, statusMessage: "Not Modified", headers };
+  }
+  return { status: 200, headers, body: found.body };
 };

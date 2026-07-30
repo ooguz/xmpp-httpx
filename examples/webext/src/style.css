@@ -37,10 +37,20 @@ body {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
-#status {
+.chip {
   font-size: 0.8rem;
   padding: 0.15rem 0.6rem;
   border-radius: 999px;
+  white-space: nowrap;
+}
+#cacheState {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  opacity: 0.85;
+}
+#cacheState[data-state="hit"],
+#cacheState[data-state="revalidated"] {
+  background: #1b6e2022;
+  color: #1b6e20;
 }
 #status[data-state="disconnected"] {
   background: #b3261e22;

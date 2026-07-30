@@ -32,6 +32,8 @@ protocol-handler events → open/focus `browser.html#<url>`.
 | `src/sanitize-css.ts` | CSSOM-based CSS sanitizer for `<style>` blocks and `style=` attributes |
 | `src/page-meta.ts` | Title + favicon read from the raw document (pre-sanitization, since `<link>` is stripped) |
 | `src/download.ts` | Renderable-vs-downloadable content types, `Content-Disposition` filenames, `downloads.download` |
+| `src/forms.ts` | GET/urlencoded-POST form model: action resolution, refusals, submission construction |
+| `src/cache.ts` | HTTP cache on the Cache API: freshness, revalidation, invalidation |
 | `src/ext.ts` | `browser`/`chrome`/absent API lookup shared by the modules that need it |
 | `public/background.js` | Omnibox/action/protocol-handler routing only |
 | `manifest.base.json` + `scripts/make-manifests.mjs` | Shared manifest + per-target patches → `dist/chromium/`, `dist/firefox/` |
@@ -180,6 +182,35 @@ browsers do) and go through normal navigation, so they get a history entry;
 POST results render in place without one, since they are not bookmarkable.
 
 Non-HTML responses render directly: images via blob URL, text in a `<pre>`.
+
+### Caching (`src/cache.ts`)
+
+Responses are cached in the **Cache API**, which brings one constraint worth
+knowing: it only accepts http(s) request keys, so every httpx URL is mapped to
+a synthetic `https://httpx.invalid/<encoded>` key. Nothing ever fetches that
+URL — it is a key, not an address.
+
+Bodies are buffered once and re-wrapped for both the caller and the cache.
+Teeing the stream instead would deadlock as soon as one side applied
+backpressure (the cache reads eagerly; a caller might never read at all).
+
+Freshness implements the parts of RFC 9111 a browser cache actually needs:
+`no-store` (never stored), `no-cache` (stored but always revalidated),
+`max-age` measured against a stored-at stamp plus any `Age`, and `Expires` as
+a fallback. **No heuristic freshness** — a response with no explicit lifetime
+is revalidated every time, which is the conservative choice for a transport
+where a stale page is more surprising than a round trip.
+
+Revalidation sends `If-None-Match`/`If-Modified-Since`; a 304 refreshes the
+stored metadata (new `Cache-Control`, new `Date`) while keeping the body the
+server just vouched for. POST bypasses the cache and *invalidates* the entry
+for the URL it targeted, as browsers do for unsafe methods. Reload skips the
+freshness check but still revalidates, so an unchanged page costs one 304
+instead of a whole body over XMPP — the payoff that makes caching worth having
+on a transport this expensive.
+
+The chrome shows which of those happened (`cache` / `304` / `network`), and
+the settings dialog can clear the cache.
 
 ## Manifest strategy
 

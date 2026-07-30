@@ -79,6 +79,30 @@ describe("component gateway serving the demo site", () => {
     expect(html).toContain("Mood: <b>happy</b>");
   });
 
+  it("answers If-None-Match with a 304 over the wire", async () => {
+    const first = await httpxFetch("httpx://web@httpx.localhost/about.html", {
+      session: alice.session,
+    });
+    const etag = first.headers.get("etag");
+    expect(etag).toBeTruthy();
+    expect(first.headers.get("cache-control")).toContain("max-age");
+    await first.text();
+
+    const revalidated = await httpxFetch("httpx://web@httpx.localhost/about.html", {
+      session: alice.session,
+      headers: { "if-none-match": etag! },
+    });
+    expect(revalidated.status).toBe(304);
+    expect(await revalidated.text()).toBe("");
+
+    const changed = await httpxFetch("httpx://web@httpx.localhost/about.html", {
+      session: alice.session,
+      headers: { "if-none-match": '"stale"' },
+    });
+    expect(changed.status).toBe(200);
+    expect(await changed.text()).toContain("<h1>About</h1>");
+  });
+
   it("serves an attachment the browser would save", async () => {
     const response = await httpxFetch(
       "httpx://web@httpx.localhost/download/report.bin",

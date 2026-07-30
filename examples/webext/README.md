@@ -11,11 +11,20 @@ manifest variants.
 - The **XMPP connection lives in the tab page** (WebSocket via
   `@xmpp/client`), so MV3 service-worker lifetime is a non-issue; the
   background script only routes omnibox/protocol-handler events.
-- Fetched HTML is sanitized with DOMPurify (no scripts, styles, or forms),
+- Fetched HTML is sanitized with DOMPurify (no scripts, framing, or plugins),
   relative links and images are resolved with `resolveHttpxUrl`, images are
   fetched over httpx into `blob:` URLs, and the result renders in an iframe
   sandboxed **without** `allow-scripts`. Link clicks are intercepted to
   navigate httpx URLs in place; http(s) links open in a real tab.
+- **Page CSS** (`<style>` and `style=`) survives a CSSOM-based sanitizer, with
+  `url()` references fetched over httpx like images.
+- **Forms**: GET queries and urlencoded POST bodies, driven by the parent page
+  (uploads, multipart and non-httpx actions are refused with an explanation).
+- **Caching**: Cache API keyed by httpx URL, honoring `Cache-Control`/`ETag`
+  with `If-None-Match` revalidation; the chrome shows `cache` / `304` /
+  `network` for the current page, and the settings dialog can clear it.
+- **Downloads** for content the viewport can't display, **page titles and
+  favicons** from the fetched document, and error pages with working retry.
 
 ## Address-bar reality (2026)
 
