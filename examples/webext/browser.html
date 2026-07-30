@@ -13,6 +13,12 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
+    <!-- Tab labels are page titles; the strip is built with textContent in JS. -->
+    <nav id="tabstrip">
+      <ul id="tabs"></ul>
+      <button id="newTab" title="New tab" aria-label="New tab">+</button>
+    </nav>
+
     <header id="chrome">
       <button id="back" title="Back" aria-label="Back">←</button>
       <button id="forward" title="Forward" aria-label="Forward">→</button>
@@ -64,7 +70,9 @@
     </dialog>
 
     <main>
-      <iframe id="viewport" sandbox="allow-same-origin" title="page content"></iframe>
+      <!-- One sandboxed iframe per tab, created in app.ts; only the active one
+           is visible, so switching tabs never refetches a page. -->
+      <div id="viewports"></div>
 
       <!-- Entries are built with textContent: page titles are hostile input. -->
       <aside id="drawer" hidden aria-label="History and bookmarks">

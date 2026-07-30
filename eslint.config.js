@@ -39,6 +39,18 @@ export default tseslint.config(
     },
   },
   {
+    // scripts/smoke-browser.mjs drives a real browser: the callbacks it passes
+    // to page.evaluate/waitForFunction are serialized and run *in the page*, so
+    // browser globals are legitimate there even though the file runs in Node.
+    files: ["scripts/smoke-browser.mjs"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        getComputedStyle: "readonly",
+      },
+    },
+  },
+  {
     // Standalone runtime scripts (demo gateway, manifest packaging).
     files: ["scripts/**/*.mjs", "examples/*/scripts/**/*.mjs"],
     languageOptions: {
@@ -52,6 +64,9 @@ export default tseslint.config(
         queueMicrotask: "readonly",
         ReadableStream: "readonly",
         URL: "readonly",
+        URLSearchParams: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
       },
     },
   },

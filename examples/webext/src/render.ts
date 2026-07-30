@@ -220,7 +220,13 @@ export interface ErrorAction {
  */
 export async function renderError(
   iframe: HTMLIFrameElement,
-  info: { heading: string; detail?: string; actions?: ErrorAction[] },
+  info: {
+    heading: string;
+    detail?: string;
+    actions?: ErrorAction[];
+    /** Glyph before the heading; defaults to a warning sign, `""` for none. */
+    icon?: string;
+  },
   onAction: (id: string) => void = () => {},
 ): Promise<void> {
   const doc = document.implementation.createHTMLDocument();
@@ -236,7 +242,7 @@ export async function renderError(
 
   const heading = doc.createElement("h2");
   heading.className = "heading";
-  heading.append(doc.createTextNode(`⚠ ${info.heading}`));
+  heading.textContent = [info.icon ?? "⚠", info.heading].filter(Boolean).join(" ");
   doc.body.append(heading);
 
   if (info.detail) {

@@ -51,7 +51,7 @@ const PAGES: Record<string, { type: string; body: string | Uint8Array }> = {
   },
   "/about.html": {
     type: "text/html; charset=utf-8",
-    body: `<!doctype html><html>${HEAD}<body><h1>About</h1>
+    body: `<!doctype html><html>${HEAD.replace("<title>httpx demo</title>", "<title>About — httpx demo</title>")}<body><h1>About</h1>
 <p>Served by a XEP-0114 component over XEP-0332.</p>
 <p><a href="/">Home</a></p></body></html>`,
   },

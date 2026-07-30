@@ -34,15 +34,46 @@ protocol-handler events → open/focus `browser.html#<url>`.
 | `src/download.ts` | Renderable-vs-downloadable content types, `Content-Disposition` filenames, `downloads.download` |
 | `src/forms.ts` | GET/urlencoded-POST form model: action resolution, refusals, submission construction |
 | `src/cache.ts` | HTTP cache on the Cache API: freshness, revalidation, invalidation |
+| `src/tabs.ts` | Tab bookkeeping and each tab's own back/forward stack (DOM-free) |
+| `src/tab-strip.ts` | Builds the tab strip DOM |
 | `src/history.ts` | Visit history + bookmarks in `storage.local`, with title normalization |
 | `src/drawer.ts` | Builds the history/bookmarks list DOM (extracted so it can be tested directly) |
 | `src/ext.ts` | `browser`/`chrome`/absent API lookup shared by the modules that need it |
 | `public/background.js` | Omnibox/action/protocol-handler routing only |
 | `manifest.base.json` + `scripts/make-manifests.mjs` | Shared manifest + per-target patches → `dist/chromium/`, `dist/firefox/` |
 
-Navigation is **hash-based**: the current httpx URL lives in
-`browser.html#httpx://…`, so the platform's own history/back/forward works,
-deep links are copyable, and no background round-trip is involved.
+### Tabs, and what they cost the hash
+
+The single-tab browser was **hash-based**: the current URL lived in
+`browser.html#httpx://…` and the platform's own history gave back/forward for
+free. Tabs make that untenable — one shared entry list cannot represent "each
+tab has its own back stack", so Back in tab B would walk into pages opened in
+tab A. So `src/tabs.ts` owns a per-tab stack, the in-page back/forward buttons
+drive it, and **the hash becomes a mirror** of the active tab's URL, written
+with `replaceState` (which fires no `hashchange`, so it cannot loop). Deep links
+still work: an incoming `#httpx://…` — from the omnibox, a `protocol_handlers`
+link, or a hand-edited hash — loads into the active tab.
+
+The trade is deliberate: the *browser's* Back button (Alt+Left) no longer walks
+httpx pages, because those entries no longer exist. The in-page buttons do, and
+they now disable themselves at the ends of each tab's stack.
+
+Each tab keeps **its own iframe**, alive for the tab's lifetime, with only the
+active one visible. Switching tabs is therefore free — no refetch, no re-render,
+scroll position preserved. Two consequences worth knowing:
+
+- Hidden iframes still load their `srcdoc`, which is what lets a load complete
+  in a background tab (pinned by a test in `test/browser/render.test.ts` —
+  the whole design would silently hang otherwise).
+- Closing a tab **mid-load** cannot detach its iframe: a removed iframe never
+  fires `load`, so the pending render would never settle and its blob URLs would
+  never be revoked. The tab is marked for discard instead and dropped when the
+  load finishes.
+
+Per-tab state (blob cleanups, favicon, cache chip, page title) lives in a
+resources map keyed by tab id; `syncChrome()` is the single place that pushes the
+active tab's state into the shared chrome, and a load that finishes while the
+user is looking at another tab updates its own tab only.
 
 ## Address-bar reality (verified 2026)
 

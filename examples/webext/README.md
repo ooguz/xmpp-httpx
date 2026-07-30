@@ -6,8 +6,8 @@ manifest variants.
 
 ## What it does
 
-- An extension page (`browser.html`) acts as the browser chrome: address
-  bar, back/forward/reload (hash-based history), connection settings.
+- An extension page (`browser.html`) acts as the browser chrome: **tab strip**,
+  address bar, back/forward/reload (per-tab history), connection settings.
 - The **XMPP connection lives in the tab page** (WebSocket via
   `@xmpp/client`), so MV3 service-worker lifetime is a non-issue; the
   background script only routes omnibox/protocol-handler events.
@@ -28,6 +28,11 @@ manifest variants.
   favicons** from the fetched document, and error pages with working retry.
 - **History and bookmarks** in a drawer (☰), backed by `storage.local`, with a
   bookmark star (☆/★) in the chrome.
+- **Tabs**: one live iframe per tab, so switching never refetches; each tab has
+  its own back/forward stack.
+
+After the demo-site steps below, `npm run smoke` (from the repo root) drives all
+of this in real Chromium and reports what works.
 
 ## Address-bar reality (2026)
 

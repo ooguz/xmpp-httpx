@@ -11,12 +11,94 @@ body {
   flex-direction: column;
   height: 100vh;
 }
+#tabstrip {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0.3rem 0.5rem 0;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+#tabs {
+  display: flex;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  overflow-x: auto;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  min-width: 6rem;
+  max-width: 14rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+.tab[data-active] {
+  background: Canvas;
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+}
+.tab .select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0.35rem 0.1rem 0.35rem 0.6rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab[data-active] .select {
+  font-weight: 600;
+}
+.tab .close {
+  font: inherit;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 0;
+  opacity: 0.5;
+  cursor: pointer;
+  padding: 0.3rem 0.45rem;
+}
+.tab .close:hover {
+  opacity: 1;
+}
+#newTab {
+  font-size: 1rem;
+  align-self: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  background: transparent;
+  cursor: pointer;
+}
+#viewports {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+#viewports iframe {
+  flex: 1;
+  border: 0;
+  background: Canvas;
+}
 #chrome {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.6rem;
   border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+#chrome button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 #chrome button {
   font-size: 1rem;
@@ -67,11 +149,6 @@ body {
 main {
   flex: 1;
   display: flex;
-}
-#viewport {
-  flex: 1;
-  border: 0;
-  background: Canvas;
 }
 #drawer {
   width: min(24rem, 45vw);

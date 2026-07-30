@@ -23,16 +23,22 @@ import {
 import { extractPageMeta, type PageMeta } from "./page-meta.js";
 import { renderError, renderHtml, renderPlain } from "./render.js";
 import { loadSettings, saveSettings, type ConnectionSettings } from "./settings.js";
+import { buildTabStrip } from "./tab-strip.js";
+import { TabSet } from "./tabs.js";
 
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 
 const address = $<HTMLInputElement>("address");
-const viewport = $<HTMLIFrameElement>("viewport");
+const viewports = $<HTMLDivElement>("viewports");
+const tabList = $<HTMLUListElement>("tabs");
 const status = $<HTMLSpanElement>("status");
 const settingsDialog = $<HTMLDialogElement>("settings");
 const cacheChip = $<HTMLSpanElement>("cacheState");
 const bookmarkBtn = $<HTMLButtonElement>("bookmark");
+const backBtn = $<HTMLButtonElement>("back");
+const forwardBtn = $<HTMLButtonElement>("forward");
+const reloadBtn = $<HTMLButtonElement>("reload");
 const drawer = $<HTMLElement>("drawer");
 const drawerBtn = $<HTMLButtonElement>("drawerBtn");
 const drawerList = $<HTMLUListElement>("drawerList");
@@ -47,10 +53,141 @@ connection.onStateChange = (state) => {
     state === "online" ? "online" : state === "connecting" ? "connecting…" : "offline";
 };
 
-let cleanupPage: (() => void) | undefined;
-let revokeFavicon: (() => void) | undefined;
-/** Title of the page on screen, for history and bookmarks. */
-let pageTitle: string | undefined;
+// --- tabs -----------------------------------------------------------------------
+
+/** Everything a tab owns beyond its URL and history (which `TabSet` holds). */
+interface TabResources {
+  iframe: HTMLIFrameElement;
+  /** Revokes the blob URLs of the page currently rendered in this tab. */
+  cleanup?: () => void;
+  revokeFavicon?: () => void;
+  faviconHref: string;
+  cacheState: CacheState;
+  /** Page title, for bookmarks and history. */
+  pageTitle?: string;
+  /** A load is in flight; closing must not detach the iframe yet. */
+  loading: boolean;
+  /** Close was requested mid-load; drop the tab once the load settles. */
+  discard: boolean;
+}
+
+const tabs = new TabSet();
+const resources = new Map<number, TabResources>();
+
+/**
+ * One sandboxed iframe per tab, created on demand and kept alive while the tab
+ * exists — switching tabs then costs nothing, no refetch. Hidden iframes still
+ * load their `srcdoc`, which is what makes a background load work.
+ */
+function resourcesFor(id: number): TabResources {
+  const existing = resources.get(id);
+  if (existing) return existing;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-same-origin"); // never allow-scripts
+  iframe.title = "page content";
+  viewports.append(iframe);
+
+  const created: TabResources = {
+    iframe,
+    faviconHref: DEFAULT_FAVICON,
+    cacheState: "bypass",
+    loading: false,
+    discard: false,
+  };
+  resources.set(id, created);
+  return created;
+}
+
+function renderTabStrip(): void {
+  const activeId = tabs.active.id;
+  tabList.replaceChildren(
+    buildTabStrip(
+      tabs.tabs.map((tab) => ({
+        id: tab.id,
+        title: tab.title,
+        url: tab.url,
+        active: tab.id === activeId,
+      })),
+      { onSelect: selectTab, onClose: closeTab },
+    ),
+  );
+}
+
+/** Pushes all per-tab state into the shared chrome. */
+function syncChrome(): void {
+  const tab = tabs.active;
+  const res = resourcesFor(tab.id);
+
+  for (const [id, other] of resources) other.iframe.hidden = id !== tab.id;
+
+  address.value = tab.url;
+  document.title = tab.url === "" ? "httpx browser" : `${tab.title} — httpx`;
+  favicon.setAttribute("href", res.faviconHref);
+  showCacheChip(res.cacheState);
+  backBtn.disabled = !tabs.canGoBack();
+  forwardBtn.disabled = !tabs.canGoForward();
+  reloadBtn.disabled = tab.url === "";
+  renderTabStrip();
+
+  // The hash mirrors the active tab so deep links stay copyable; it is no
+  // longer the source of truth (each tab owns its own back/forward stack).
+  const hash = tab.url === "" ? "" : `#${tab.url}`;
+  if (window.location.hash !== hash) {
+    history.replaceState(null, "", hash === "" ? window.location.pathname : hash);
+  }
+  void refreshBookmarkButton(tab.url);
+}
+
+function selectTab(id: number): void {
+  tabs.activate(id);
+  syncChrome();
+}
+
+function openTab(url?: string): void {
+  const tab = tabs.open();
+  const res = resourcesFor(tab.id);
+  syncChrome();
+  if (url === undefined || url === "") void renderNewTabPage(res.iframe);
+  else void navigate(url);
+}
+
+function closeTab(id: number): void {
+  const res = resources.get(id);
+  if (res) {
+    res.cleanup?.();
+    res.cleanup = undefined;
+    res.revokeFavicon?.();
+    res.revokeFavicon = undefined;
+    if (res.loading) {
+      // Detaching now would strand the pending load: a removed iframe never
+      // fires `load`, so its promise would never settle and its blob URLs
+      // would never be revoked. Let the load finish, then drop the tab.
+      res.discard = true;
+    } else {
+      res.iframe.remove();
+      resources.delete(id);
+    }
+  }
+
+  tabs.close(id);
+  const active = tabs.active;
+  const activeRes = resourcesFor(active.id);
+  syncChrome();
+  if (active.url === "" && activeRes.iframe.srcdoc === "") {
+    void renderNewTabPage(activeRes.iframe);
+  }
+}
+
+function renderNewTabPage(iframe: HTMLIFrameElement): Promise<void> {
+  return renderError(iframe, {
+    icon: "",
+    heading: "New tab",
+    detail: "Type an httpx:// address above, or open a page from the drawer (☰).",
+  });
+}
+
+// --- fetching -------------------------------------------------------------------
 
 /** "ext+httpx://…" (Firefox protocol handler) → "httpx://…". */
 function normalizeUrl(raw: string): string {
@@ -86,6 +223,7 @@ const fetchResource = async (resourceUrl: string): Promise<Blob> => {
  */
 async function fetchThroughCache(
   href: string,
+  res: TabResources,
   init: { method?: "GET" | "POST"; body?: URLSearchParams; reload?: boolean },
 ): Promise<Response> {
   const request = (headers?: Record<string, string>): Promise<Response> =>
@@ -99,14 +237,14 @@ async function fetchThroughCache(
   if (init.method === "POST") {
     const response = await request();
     await invalidate(href);
-    showCacheState("bypass");
+    res.cacheState = "bypass";
     return response;
   }
 
   const { response, state } = await cachedFetch(href, request, {
     ...(init.reload ? { reload: true } : {}),
   });
-  showCacheState(state);
+  res.cacheState = state;
   return response;
 }
 
@@ -117,7 +255,7 @@ const CACHE_LABELS: Record<CacheState, string> = {
   bypass: "",
 };
 
-function showCacheState(state: CacheState): void {
+function showCacheChip(state: CacheState): void {
   const label = CACHE_LABELS[state];
   cacheChip.textContent = label;
   cacheChip.dataset["state"] = state;
@@ -130,6 +268,7 @@ function showCacheState(state: CacheState): void {
         : "Fetched over XMPP";
 }
 
+/** Navigates the active tab, recording the move in that tab's history. */
 async function navigate(rawUrl: string): Promise<void> {
   const url = normalizeUrl(rawUrl);
   if (url === "") return;
@@ -138,43 +277,19 @@ async function navigate(rawUrl: string): Promise<void> {
   try {
     href = parseHttpxUrl(url).href;
   } catch (err) {
-    await showError(`Not an httpx URL: ${url}`, err);
+    await showError(tabs.active.id, `Not an httpx URL: ${url}`, err);
     return;
   }
 
-  address.value = href;
-  if (`#${href}` !== window.location.hash) {
-    window.location.hash = href; // history entry; hashchange re-enters below
-    return;
-  }
-
-  if (connection.state !== "online") {
-    await renderError(
-      viewport,
-      {
-        heading: "Not connected",
-        detail: `Connect to an XMPP account to load ${href}.`,
-        actions: [
-          { id: "connect", label: "Connection settings" },
-          { id: "retry", label: "Retry" },
-        ],
-      },
-      (action) => {
-        if (action === "connect") settingsDialog.showModal();
-        else void navigate(href);
-      },
-    );
-    settingsDialog.showModal();
-    return;
-  }
-
+  tabs.visit(href);
+  syncChrome();
   await load(href);
 }
 
 /**
- * Fetches and displays one httpx URL. Split out of `navigate` so a POST
- * submission can reuse the whole render/download path without touching the
- * hash — POST results are not bookmarkable, so they get no history entry.
+ * Fetches and displays one URL in one tab. Separate from `navigate` so back,
+ * forward, reload and POST submissions can reuse it without touching the tab's
+ * history stack.
  */
 async function load(
   href: string,
@@ -184,49 +299,88 @@ async function load(
     reload?: boolean;
   } = {},
 ): Promise<void> {
-  resetPage(href);
-  address.value = href;
+  const tab = tabs.active;
+  const res = resourcesFor(tab.id);
+  const isActive = () => tabs.active.id === tab.id;
+
+  releasePage(res);
+  res.loading = true;
 
   try {
-    const response = await fetchThroughCache(href, init);
+    if (connection.state !== "online") {
+      await renderError(
+        res.iframe,
+        {
+          heading: "Not connected",
+          detail: `Connect to an XMPP account to load ${href}.`,
+          actions: [
+            { id: "connect", label: "Connection settings" },
+            { id: "retry", label: "Retry" },
+          ],
+        },
+        (action) => {
+          if (action === "connect") settingsDialog.showModal();
+          else void load(href);
+        },
+      );
+      settingsDialog.showModal();
+      return;
+    }
+
+    const response = await fetchThroughCache(href, res, init);
     const contentType = response.headers.get("content-type") ?? "";
     const disposition = response.headers.get("content-disposition");
 
     if (isAttachment(disposition) || !isRenderableType(contentType)) {
-      await download(href, response, disposition);
-      return; // a saved file is not a page in history
+      // A saved file is not a page: no title, no history entry.
+      await download(href, tab.id, res, response, disposition);
+      if (isActive()) syncChrome();
+      return;
     }
 
     if (contentType.includes("text/html")) {
       const html = await response.text();
       const meta = extractPageMeta(html, href);
-      cleanupPage = await renderHtml(html, href, {
-        iframe: viewport,
+      res.cleanup = await renderHtml(html, href, {
+        iframe: res.iframe,
         fetchResource,
-        onNavigate: (nextUrl) => void navigate(nextUrl),
-        onSubmit: (submission, reason) => void submitForm(submission, reason),
+        onNavigate: (nextUrl) => {
+          tabs.activate(tab.id);
+          void navigate(nextUrl);
+        },
+        onSubmit: (submission, reason) => {
+          tabs.activate(tab.id);
+          void submitForm(submission, reason);
+        },
       });
-      applyPageMeta(href, meta);
-      pageTitle = meta.title;
+      applyPageMeta(tab.id, res, href, meta);
     } else {
-      cleanupPage = await renderPlain(contentType, await response.blob(), {
-        iframe: viewport,
+      res.cleanup = await renderPlain(contentType, await response.blob(), {
+        iframe: res.iframe,
       });
-      pageTitle = undefined;
+      res.pageTitle = undefined;
+      tabs.setTitle(tab.id, href);
     }
 
     if (!response.ok) {
-      document.title = `(${response.status}) ${document.title}`;
+      tabs.setTitle(tab.id, `(${response.status}) ${tab.title}`);
     }
 
     // POST results are not addressable, so they are not history either.
     if (init.method !== "POST" && response.ok) {
-      await recordVisit(href, pageTitle);
+      await recordVisit(href, res.pageTitle);
       if (isDrawerOpen()) await renderDrawer();
     }
-    await refreshBookmarkButton(href);
+    if (isActive()) syncChrome();
   } catch (err) {
-    await showError(`Failed to load ${href}`, err);
+    await showError(tab.id, `Failed to load ${href}`, err);
+  } finally {
+    res.loading = false;
+    if (res.discard) {
+      res.cleanup?.();
+      res.iframe.remove();
+      resources.delete(tab.id);
+    }
   }
 }
 
@@ -241,10 +395,11 @@ async function submitForm(
   submission: FormSubmission | null,
   reason: FormRefusal | null,
 ): Promise<void> {
+  const res = resourcesFor(tabs.active.id);
   if (!submission) {
-    const current = address.value;
+    const current = tabs.active.url;
     await renderError(
-      viewport,
+      res.iframe,
       {
         heading: "Form not submitted",
         detail: reason ? REFUSAL_REASONS[reason] : "Unsupported form.",
@@ -258,43 +413,59 @@ async function submitForm(
     await navigate(submission.url);
     return;
   }
+  // A POST result *is* the tab's current page, so it takes the tab's URL and a
+  // stack entry — otherwise the address bar would revert to the form's page on
+  // the next chrome sync. It stays out of the persistent visit history (the
+  // drawer) because it is not something to reopen later. Back/forward onto it
+  // re-issues a plain GET; the body is not replayed.
+  tabs.visit(submission.url);
+  syncChrome();
   await load(submission.url, { method: "POST", body: submission.body });
 }
 
 /** Content the viewport can't show is saved instead, with a receipt page. */
 async function download(
   href: string,
+  id: number,
+  res: TabResources,
   response: Response,
   disposition: string | null,
 ): Promise<void> {
   const filename = filenameFor(href, disposition);
-  const revoke = saveBlob(await response.blob(), filename);
-  cleanupPage = revoke;
-  document.title = `${filename} — httpx`;
+  res.cleanup = saveBlob(await response.blob(), filename);
+  res.pageTitle = filename;
+  tabs.setTitle(id, filename);
   await renderError(
-    viewport,
+    res.iframe,
     {
+      icon: "⤓",
       heading: `Downloading ${filename}`,
       detail: `${href}\n${response.headers.get("content-type") ?? "unknown type"}`,
       actions: [{ id: "again", label: "Download again" }],
     },
-    () => void navigate(href),
+    () => void load(href),
   );
 }
 
-/** Clears the previous page's resources and resets per-page chrome. */
-function resetPage(href: string): void {
-  cleanupPage?.();
-  cleanupPage = undefined;
-  revokeFavicon?.();
-  revokeFavicon = undefined;
-  favicon.setAttribute("href", DEFAULT_FAVICON);
-  document.title = `${href} — httpx`;
+/** Drops the resources of whatever this tab was showing. */
+function releasePage(res: TabResources): void {
+  res.cleanup?.();
+  res.cleanup = undefined;
+  res.revokeFavicon?.();
+  res.revokeFavicon = undefined;
+  res.faviconHref = DEFAULT_FAVICON;
+  res.pageTitle = undefined;
 }
 
-function applyPageMeta(href: string, meta: PageMeta): void {
-  document.title = meta.title ? `${meta.title} — httpx` : `${href} — httpx`;
-  if (meta.iconUrl) void loadFavicon(meta.iconUrl);
+function applyPageMeta(
+  id: number,
+  res: TabResources,
+  href: string,
+  meta: PageMeta,
+): void {
+  res.pageTitle = meta.title;
+  tabs.setTitle(id, meta.title ?? href);
+  if (meta.iconUrl) void loadFavicon(id, res, meta.iconUrl);
 }
 
 /**
@@ -302,15 +473,40 @@ function applyPageMeta(href: string, meta: PageMeta): void {
  * the session into a blob URL: the extension page itself never issues a remote
  * request on a page's behalf.
  */
-async function loadFavicon(iconUrl: string): Promise<void> {
+async function loadFavicon(
+  id: number,
+  res: TabResources,
+  iconUrl: string,
+): Promise<void> {
   try {
     const blob = await fetchResource(iconUrl);
     const url = URL.createObjectURL(blob);
-    revokeFavicon = () => URL.revokeObjectURL(url);
-    favicon.setAttribute("href", url);
+    res.revokeFavicon = () => URL.revokeObjectURL(url);
+    res.faviconHref = url;
+    if (tabs.active.id === id) favicon.setAttribute("href", url);
   } catch {
     // A missing favicon is not worth reporting.
   }
+}
+
+async function showError(id: number, message: string, err: unknown): Promise<void> {
+  console.error("[httpx]", message, err);
+  const res = resourcesFor(id);
+  releasePage(res);
+  tabs.setTitle(id, message);
+  if (tabs.active.id === id) syncChrome();
+  await renderError(
+    res.iframe,
+    {
+      heading: message,
+      detail: err instanceof Error ? err.message : String(err),
+      actions: [{ id: "retry", label: "Retry" }],
+    },
+    () => {
+      const url = tabs.tabs.find((tab) => tab.id === id)?.url;
+      if (url) void load(url);
+    },
+  );
 }
 
 // --- history & bookmarks drawer ------------------------------------------------
@@ -319,9 +515,10 @@ type DrawerPanel = "history" | "bookmarks";
 let panel: DrawerPanel = "history";
 
 async function refreshBookmarkButton(href: string): Promise<void> {
-  const marked = await isBookmarked(href);
+  const marked = href !== "" && (await isBookmarked(href));
   bookmarkBtn.textContent = marked ? "★" : "☆";
   bookmarkBtn.setAttribute("aria-pressed", String(marked));
+  bookmarkBtn.disabled = href === "";
   bookmarkBtn.title = marked ? "Remove bookmark" : "Bookmark this page";
 }
 
@@ -339,7 +536,7 @@ async function renderDrawer(): Promise<void> {
           if (panel === "history") await removeVisit(url);
           else await removeBookmark(url);
           await renderDrawer();
-          await refreshBookmarkButton(address.value);
+          await refreshBookmarkButton(tabs.active.url);
         })(),
       removeLabel: panel === "history" ? "Forget this page" : "Remove bookmark",
     }),
@@ -360,37 +557,34 @@ function setDrawerOpen(open: boolean): void {
   if (open) void renderDrawer();
 }
 
-async function showError(message: string, err: unknown): Promise<void> {
-  console.error("[httpx]", message, err);
-  resetPage(address.value || message);
-  document.title = `${message} — httpx`;
-  await renderError(
-    viewport,
-    {
-      heading: message,
-      detail: err instanceof Error ? err.message : String(err),
-      actions: [{ id: "retry", label: "Retry" }],
-    },
-    () => void navigate(address.value),
-  );
-}
-
 // --- chrome wiring ----------------------------------------------------------
 
 $<HTMLFormElement>("nav").addEventListener("submit", (event) => {
   event.preventDefault();
   void navigate(address.value);
 });
-$<HTMLButtonElement>("back").addEventListener("click", () => history.back());
-$<HTMLButtonElement>("forward").addEventListener("click", () => history.forward());
-$<HTMLButtonElement>("reload").addEventListener("click", () => {
+backBtn.addEventListener("click", () => {
+  const url = tabs.back();
+  syncChrome();
+  if (url) void load(url);
+});
+forwardBtn.addEventListener("click", () => {
+  const url = tabs.forward();
+  syncChrome();
+  if (url) void load(url);
+});
+reloadBtn.addEventListener("click", () => {
   // Reload skips the freshness check but still revalidates: an unchanged page
   // costs one 304 instead of a whole body.
-  const current = window.location.hash.slice(1);
-  if (current) void load(parseHttpxUrl(normalizeUrl(current)).href, { reload: true });
+  const { url } = tabs.active;
+  if (url !== "") void load(url, { reload: true });
 });
+$<HTMLButtonElement>("newTab").addEventListener("click", () => openTab());
 $<HTMLButtonElement>("clearCache").addEventListener("click", () => {
-  void clearCache().then(() => showCacheState("bypass"));
+  void clearCache().then(() => {
+    for (const res of resources.values()) res.cacheState = "bypass";
+    showCacheChip("bypass");
+  });
 });
 $<HTMLButtonElement>("settingsBtn").addEventListener("click", () => {
   settingsDialog.showModal();
@@ -405,7 +599,7 @@ $<HTMLButtonElement>("drawerClear").addEventListener("click", () => {
     if (panel === "history") await clearHistory();
     else for (const mark of await listBookmarks()) await removeBookmark(mark.url);
     await renderDrawer();
-    await refreshBookmarkButton(address.value);
+    await refreshBookmarkButton(tabs.active.url);
   })();
 });
 for (const tab of $<HTMLDivElement>("drawerTabs").querySelectorAll("[data-panel]")) {
@@ -422,16 +616,19 @@ for (const tab of $<HTMLDivElement>("drawerTabs").querySelectorAll("[data-panel]
 
 bookmarkBtn.addEventListener("click", () => {
   void (async () => {
-    const href = address.value;
-    if (href === "") return;
-    await toggleBookmark(href, pageTitle);
-    await refreshBookmarkButton(href);
+    const { url, id } = tabs.active;
+    if (url === "") return;
+    await toggleBookmark(url, resourcesFor(id).pageTitle);
+    await refreshBookmarkButton(url);
     if (isDrawerOpen() && panel === "bookmarks") await renderDrawer();
   })();
 });
 
+// A deep link or a hand-edited hash: load it into the active tab. Our own
+// updates use replaceState, which fires no hashchange, so this cannot loop.
 window.addEventListener("hashchange", () => {
-  void navigate(window.location.hash.slice(1));
+  const wanted = window.location.hash.slice(1);
+  if (wanted !== "" && wanted !== tabs.active.url) void navigate(wanted);
 });
 
 // --- settings ----------------------------------------------------------------
@@ -453,10 +650,10 @@ $<HTMLFormElement>("settingsForm").addEventListener("submit", (event) => {
     try {
       setCacheScope(settings.jid);
       await connection.connect(settings);
-      const pending = window.location.hash.slice(1);
+      const pending = tabs.active.url || window.location.hash.slice(1);
       if (pending) void navigate(pending);
     } catch (err) {
-      showError("XMPP connection failed", err);
+      void showError(tabs.active.id, "XMPP connection failed", err);
     }
   })();
 });
@@ -478,9 +675,12 @@ void (async () => {
       console.warn("[httpx] auto-connect failed:", err);
     }
   }
+
+  syncChrome();
   if (initial) {
     void navigate(initial);
-  } else if (connection.state !== "online") {
-    settingsDialog.showModal();
+  } else {
+    void renderNewTabPage(resourcesFor(tabs.active.id).iframe);
+    if (connection.state !== "online") settingsDialog.showModal();
   }
 })();

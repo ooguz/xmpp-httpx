@@ -134,6 +134,12 @@ browser-API code, so it is tested in real Chromium rather than by hand:
   history, and self-healing from corrupt stored state.
 - `drawer.test.ts` — the drawer list DOM: a hostile page title stays text (no
   element is created from it), and open/remove clicks report the right URL.
+- `tabs.test.ts` — the tab model: per-tab back/forward stacks staying
+  independent, forward entries discarded on a new navigation, reloads adding no
+  entry, the depth cap, which tab activates when one closes, and the last tab
+  leaving a fresh empty one.
+- `tab-strip.test.ts` — the strip DOM: active marking, tooltips, hostile titles
+  staying text, and select-vs-close reported separately.
 
 These import `examples/webext/src/*` directly; the **browser project** aliases
 the `xmpp-httpx` package specifier (the example consumes the library by name) to
@@ -177,6 +183,28 @@ was a CI-only failure until the alias moved.
   per-block acks apply real backpressure — so it is what the audit
   exercises; chunkedBase64 has no protocol acks and is bounded instead by
   the receiver's `maxBufferedBytes` cap.
+
+## Browser smoke test (`npm run smoke`)
+
+`scripts/smoke-browser.mjs` drives the **built** extension page in real Chromium
+(Playwright) against `scripts/demo-gateway.mjs` over real XMPP, serving the page
+from `http://localhost` so it runs in a secure context like an extension origin
+(the Cache API and storage then behave identically). It starts the gateway
+itself; the only prerequisites are the E2E Prosody being up with `alice`
+registered, plus `npm run build && npm --prefix examples/webext run build`.
+
+It exists because the browser-mode suites cover each module in isolation while
+nothing reaches the wiring in `app.ts` — tab switching, per-tab history, the
+chrome staying in sync with the active tab. It earned that place immediately by
+catching a bug the unit tests could not: after a POST the address bar reverted
+to the form's page, because only `navigate()` updated the tab's URL. Twenty
+checks run, and any browser console error fails the run (with one filter:
+Playwright injects utility scripts into every frame, and our sandbox blocks them
+in the scriptless `srcdoc` documents — that is the sandbox working).
+
+Not in CI: no job combines Docker and Playwright today. It is the fastest way to
+sanity-check the extension by hand after touching the render or navigation
+paths.
 
 ## Manual demo path
 

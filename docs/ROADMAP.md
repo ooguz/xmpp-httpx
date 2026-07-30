@@ -148,10 +148,13 @@ Goal: from demo to daily-drivable.
   URL you can return to. Page titles are the only hostile string that reaches
   the extension's own DOM, so they are normalized on the way in and rendered
   only via `textContent` (pinned by `test/browser/drawer.test.ts`).
-- [ ] **Tab strip** (M) — multiple pages per window. Needs one iframe per tab
-  sharing the single XMPP connection, plus per-tab blob/cleanup ownership (today
-  `cleanupPage` is a single module-level slot) — a bigger change than the
-  history drawer it was originally bundled with.
+- [x] **Tab strip** (M) — multiple pages per window, one live iframe each (so
+  switching tabs never refetches), per-tab blob/favicon/cache ownership in a
+  resources map, and **per-tab back/forward stacks** (`src/tabs.ts`). The cost,
+  accepted deliberately: the hash is now a *mirror* of the active tab rather
+  than the source of truth, so the platform's own Back button no longer walks
+  httpx pages — one shared entry list cannot express per-tab history. Deep links
+  still work. Reasoning in [browser-extension.md](browser-extension.md) §Tabs.
 - [x] **Downloads** (S) — non-renderable content types (and any
   `Content-Disposition: attachment`) → `downloads.download` with a blob URL,
   `<a download>` fallback outside an extension context; filenames from
@@ -181,8 +184,12 @@ now exercises the shipped surface: a `<style>` block with a CSS background
 fetched over XMPP, a favicon, GET and POST forms, and an attachment download —
 covered end-to-end against Prosody in the component-gateway E2E suite.
 
-Acceptance: browse the demo site with styles, forms, history, and cache
-hits; installable signed artifacts.
+Acceptance: **met except signing** — `npm run smoke` drives the built extension
+in real Chromium against the demo gateway over real XMPP and checks exactly
+that: page CSS applied, CSS `url()` and images fetched into blobs, the page's
+favicon, GET and POST forms, back/forward, a 304 on revalidation, two tabs with
+independent history, the drawer and bookmarks, and an attachment downloading.
+Store zips build; signing needs publisher credentials.
 
 ## Phase 11 — Gateway as a product
 

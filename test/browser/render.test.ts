@@ -280,6 +280,36 @@ describe("renderError", () => {
     await renderError(iframe, { heading: "Gone" });
     expect(iframe.contentDocument!.querySelector("a")).toBeNull();
   });
+
+  it("can drop the warning glyph (the new-tab page uses this)", async () => {
+    const iframe = errorFrame();
+    await renderError(iframe, { icon: "", heading: "New tab" });
+    expect(iframe.contentDocument!.querySelector("h2")!.textContent).toBe("New tab");
+  });
+});
+
+describe("hidden iframes", () => {
+  it("still load their srcdoc — background tabs depend on it", async () => {
+    // The tab strip keeps one iframe per tab and hides all but the active one.
+    // If a hidden iframe did not load, a load started in a background tab (or a
+    // tab switched away from mid-load) would hang forever.
+    const iframe = document.createElement("iframe");
+    iframe.className = "render-test";
+    iframe.setAttribute("sandbox", "allow-same-origin");
+    iframe.hidden = true;
+    document.body.append(iframe);
+
+    cleanups.push(
+      await renderHtml("<p>loaded while hidden</p>", BASE, {
+        iframe,
+        fetchResource: () => Promise.reject(new Error("no subresources")),
+        onNavigate: () => {},
+      }),
+    );
+    expect(iframe.contentDocument!.body.textContent).toContain(
+      "loaded while hidden",
+    );
+  });
 });
 
 describe("renderHtml — forms", () => {
