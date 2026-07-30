@@ -4,3 +4,6 @@ coverage/
 *.tsbuildinfo
 *.log
 docs/api/
+# Vitest browser-mode debris: screenshots of failing tests, attachment blobs.
+.vitest-attachments/
+**/__screenshots__/
