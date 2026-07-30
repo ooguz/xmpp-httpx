@@ -3,7 +3,7 @@
   "name": "httpx browser (XEP-0332)",
   "version": "0.1.0",
   "description": "Navigate httpx:// URLs — HTTP tunneled over XMPP (XEP-0332)",
-  "permissions": ["storage"],
+  "permissions": ["storage", "downloads"],
   "omnibox": { "keyword": "httpx" },
   "action": { "default_title": "Open httpx browser" }
 }

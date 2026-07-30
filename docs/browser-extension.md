@@ -28,8 +28,11 @@ protocol-handler events → open/focus `browser.html#<url>`.
 | `src/app.ts` | Navigation state machine: URL normalization (`ext+httpx://` → `httpx://`), hash-based history, fetch-and-render orchestration, settings wiring |
 | `src/connection.ts` | `Connection` class owning the `@xmpp/client` WebSocket session; exposes it as the library's `XmppSession` |
 | `src/settings.ts` | Credentials in `storage.local` (localStorage fallback so the page also works as a plain tab during development) |
-| `src/render.ts` | The sanitized rendering pipeline (below) |
+| `src/render.ts` | The sanitized rendering pipeline (below), plus scriptless error pages |
 | `src/sanitize-css.ts` | CSSOM-based CSS sanitizer for `<style>` blocks and `style=` attributes |
+| `src/page-meta.ts` | Title + favicon read from the raw document (pre-sanitization, since `<link>` is stripped) |
+| `src/download.ts` | Renderable-vs-downloadable content types, `Content-Disposition` filenames, `downloads.download` |
+| `src/ext.ts` | `browser`/`chrome`/absent API lookup shared by the modules that need it |
 | `public/background.js` | Omnibox/action/protocol-handler routing only |
 | `manifest.base.json` + `scripts/make-manifests.mjs` | Shared manifest + per-target patches → `dist/chromium/`, `dist/firefox/` |
 
@@ -121,6 +124,28 @@ background images), which pings that origin on page load. This is exactly what
 an `<img src="https://…">` in the same document already does; anyone wanting
 zero third-party traffic should restrict the resolver to `httpx:` only.
 
+### Page metadata and downloads
+
+- **Title and favicon** come from `src/page-meta.ts`, which parses the *raw*
+  response before DOMPurify — sanitization removes `<link>`, taking any icon
+  reference with it. Parsing hostile HTML there is inert (`DOMParser` executes
+  no scripts and fetches no subresources) and everything extracted is used as
+  text or re-resolved as a URL, never as markup. The title is trimmed and
+  capped; the icon must resolve to `httpx:` (fetched over XMPP into a `blob:`
+  URL, revoked on navigation) or `https:`, and the last declared icon wins.
+- **Non-renderable responses are saved, not shown**: anything that is not
+  text, an image, or structured text (`+json`/`+xml`), and anything sent with
+  `Content-Disposition: attachment`, goes to `downloads.download` (permission
+  `downloads`; falls back to a synthetic `<a download>` click when the page
+  runs as a plain tab). Filenames come from `filename*`/`filename` or the
+  URL's last segment, always reduced to a **basename** with control characters
+  and leading dots stripped — a hostile server cannot steer the write out of
+  the download directory.
+- **Error pages** (`renderError`) are ordinary scriptless documents; their
+  buttons are anchors whose clicks the parent intercepts, the same mechanism
+  as page links. Failed loads offer *Retry*, and a disconnected session offers
+  *Connection settings* alongside it instead of only popping the dialog.
+
 Non-HTML responses render directly: images via blob URL, text in a `<pre>`.
 
 ## Manifest strategy
@@ -135,8 +160,8 @@ manifests because the divergences are structural, not cosmetic:
 | `protocol_handlers` | unsupported | `ext+httpx` → `/browser.html#%s` |
 | `content_security_policy` | default | explicit, to **drop `upgrade-insecure-requests`** (Firefox's MV3 default would rewrite dev-time `ws://localhost` to `wss://`) |
 
-Shared: MV3, `permissions: ["storage"]` (WebSocket connections from
-extension pages need no host permissions), `omnibox`, `action`.
+Shared: MV3, `permissions: ["storage", "downloads"]` (WebSocket connections
+from extension pages need no host permissions), `omnibox`, `action`.
 
 ## Build & verification
 
@@ -161,7 +186,7 @@ lifetime, click interception — is unit-tested in real Chromium under the
 
 - Credentials in extension storage in plaintext; `ws://` only for the local
   dev Prosody — production must be `wss://`.
-- No forms/uploads; no favicon/title from `<meta>`; one page per tab (no
-  in-extension tab strip).
+- No forms/uploads; one page per tab (no in-extension tab strip); no response
+  caching, so every navigation re-fetches.
 - `web-ext lint` flags Firefox's upcoming data-consent manifest key and the
   (sanitized) `srcdoc` assignment as warnings — both acknowledged.

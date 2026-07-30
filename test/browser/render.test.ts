@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { renderHtml, renderPlain } from "../../examples/webext/src/render.js";
+import {
+  renderError,
+  renderHtml,
+  renderPlain,
+} from "../../examples/webext/src/render.js";
 
 const BASE = "httpx://site@example.org/dir/page.html";
 const PNG = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], {
@@ -212,5 +216,58 @@ describe("renderPlain", () => {
     const doc = iframe.contentDocument!;
     expect(doc.querySelector("b")).toBeNull();
     expect(doc.querySelector("pre")!.textContent).toBe("<b>not bold</b>");
+  });
+});
+
+describe("renderError", () => {
+  const errorFrame = () => {
+    const iframe = document.createElement("iframe");
+    iframe.className = "render-test";
+    iframe.setAttribute("sandbox", "allow-same-origin");
+    document.body.append(iframe);
+    return iframe;
+  };
+
+  it("shows the heading and detail as text, never as markup", async () => {
+    const iframe = errorFrame();
+    await renderError(iframe, {
+      heading: "Failed to load httpx://a@b/c",
+      detail: "<img src=x> & <b>timeout</b>",
+    });
+    const doc = iframe.contentDocument!;
+    expect(doc.body.textContent).toContain("Failed to load httpx://a@b/c");
+    expect(doc.querySelector("img")).toBeNull();
+    expect(doc.querySelector("pre")!.textContent).toBe("<img src=x> & <b>timeout</b>");
+  });
+
+  it("reports action clicks to the host", async () => {
+    const iframe = errorFrame();
+    const clicked: string[] = [];
+    await renderError(
+      iframe,
+      {
+        heading: "Not connected",
+        actions: [
+          { id: "connect", label: "Connection settings" },
+          { id: "retry", label: "Retry" },
+        ],
+      },
+      (id) => clicked.push(id),
+    );
+    const doc = iframe.contentDocument!;
+    const links = [...doc.querySelectorAll("a[data-action]")];
+    expect(links.map((a) => a.textContent)).toEqual([
+      "Connection settings",
+      "Retry",
+    ]);
+    (links[1] as HTMLElement).click();
+    (links[0] as HTMLElement).click();
+    expect(clicked).toEqual(["retry", "connect"]);
+  });
+
+  it("renders without actions", async () => {
+    const iframe = errorFrame();
+    await renderError(iframe, { heading: "Gone" });
+    expect(iframe.contentDocument!.querySelector("a")).toBeNull();
   });
 });

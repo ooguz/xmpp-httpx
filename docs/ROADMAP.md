@@ -115,10 +115,13 @@ Goal: from demo to daily-drivable.
   end-to-end.
 - [ ] **Tab strip + history UI** (M) — multiple pages per window, a
   history/bookmarks drawer backed by `storage.local`.
-- [ ] **Downloads** (S) — non-renderable content types → `downloads.download`
-  with a blob URL.
-- [ ] **Page metadata** (S) — title/favicon from the fetched document
-  (sanitized), connection-error pages with retry.
+- [x] **Downloads** (S) — non-renderable content types (and any
+  `Content-Disposition: attachment`) → `downloads.download` with a blob URL,
+  `<a download>` fallback outside an extension context; filenames from
+  `filename*`/`filename`/URL, reduced to a sanitized basename.
+- [x] **Page metadata** (S) — title and favicon from the fetched document
+  (icon fetched over httpx into a blob URL), plus scriptless error pages with
+  working *Retry* / *Connection settings* actions.
 - [ ] **Store packaging** (M) — AMO signing + Chrome Web Store zip via
   `web-ext build`; the data-consent manifest key Firefox now warns about.
 - [ ] **`web+httpx` site handler research** (S) — a small companion website

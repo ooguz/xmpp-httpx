@@ -23,5 +23,13 @@
       "xmpp-httpx": ["./src/index.ts"]
     }
   },
-  "include": ["src", "test", "types", "*.config.ts"]
+  // examples/webext/src/webext-api.d.ts: ambient WebExtension globals for the
+  // extension sources that test/browser/ imports.
+  "include": [
+    "src",
+    "test",
+    "types",
+    "*.config.ts",
+    "examples/webext/src/webext-api.d.ts"
+  ]
 }

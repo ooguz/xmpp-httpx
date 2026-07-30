@@ -165,6 +165,70 @@ export async function renderHtml(
   return () => blobs.revoke();
 }
 
+export interface ErrorAction {
+  /** Reported back to `onAction` when clicked. */
+  id: string;
+  label: string;
+}
+
+/**
+ * Renders a browser-style error page. The document is scriptless like any
+ * other, so the buttons are anchors whose clicks the parent intercepts — the
+ * same mechanism that handles page links.
+ */
+export async function renderError(
+  iframe: HTMLIFrameElement,
+  info: { heading: string; detail?: string; actions?: ErrorAction[] },
+  onAction: (id: string) => void = () => {},
+): Promise<void> {
+  const doc = document.implementation.createHTMLDocument();
+  const style = doc.createElement("style");
+  style.textContent = `${BASE_STYLE}
+    .heading { display: flex; gap: 0.5rem; align-items: baseline; }
+    pre { white-space: pre-wrap; opacity: 0.75; font-size: 0.9rem; }
+    .actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+    .actions a { display: inline-block; padding: 0.35rem 0.9rem; border-radius: 6px;
+                 border: 1px solid #1a56db; text-decoration: none; }
+  `;
+  doc.head.append(style);
+
+  const heading = doc.createElement("h2");
+  heading.className = "heading";
+  heading.append(doc.createTextNode(`⚠ ${info.heading}`));
+  doc.body.append(heading);
+
+  if (info.detail) {
+    const pre = doc.createElement("pre");
+    pre.textContent = info.detail; // textContent: never parsed as markup
+    doc.body.append(pre);
+  }
+
+  if (info.actions?.length) {
+    const actions = doc.createElement("div");
+    actions.className = "actions";
+    for (const action of info.actions) {
+      const anchor = doc.createElement("a");
+      anchor.href = "#";
+      anchor.dataset["action"] = action.id;
+      anchor.textContent = action.label;
+      actions.append(anchor);
+    }
+    doc.body.append(actions);
+  }
+
+  await new Promise<void>((resolve) => {
+    iframe.addEventListener("load", () => resolve(), { once: true });
+    iframe.srcdoc = doc.documentElement.outerHTML;
+  });
+
+  iframe.contentDocument?.addEventListener("click", (event) => {
+    const anchor = (event.target as Element | null)?.closest?.("a[data-action]");
+    if (!anchor) return;
+    event.preventDefault();
+    onAction((anchor as HTMLElement).dataset["action"] ?? "");
+  });
+}
+
 /** Renders non-HTML responses: images directly, text in a <pre>. */
 export async function renderPlain(
   contentType: string,

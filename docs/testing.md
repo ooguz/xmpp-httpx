@@ -104,11 +104,17 @@ browser-API code, so it is tested in real Chromium rather than by hand:
   `url()` resolution and rejection, `expression()`/`behavior` removal,
   `!important` preservation, `</style>` re-escaping, idempotence, and the
   resolver contract the render pipeline depends on.
-- `render.test.ts` — `renderHtml`/`renderPlain` against a real sandboxed
-  iframe: scripts/forms/handlers stripped, page CSS surviving, httpx images
-  and CSS references fetched into `blob:` URLs (deduplicated, revoked on
-  cleanup), unavailable resources degrading instead of throwing, relative
-  links resolved, and click interception reporting only `httpx:` navigation.
+- `render.test.ts` — `renderHtml`/`renderPlain`/`renderError` against a real
+  sandboxed iframe: scripts/forms/handlers stripped, page CSS surviving, httpx
+  images and CSS references fetched into `blob:` URLs (deduplicated, revoked
+  on cleanup), unavailable resources degrading instead of throwing, relative
+  links resolved, click interception reporting only `httpx:` navigation, and
+  error-page actions reported back to the host.
+- `download.test.ts` — renderable-vs-downloadable content types and
+  `Content-Disposition` filename parsing, including the traversal/control-char
+  cases a hostile server would send.
+- `page-meta.test.ts` — title/favicon extraction from raw HTML: trimming and
+  capping, `rel~="icon"` spellings, last-icon-wins, scheme refusal.
 
 These import `examples/webext/src/*` directly; `vitest.config.ts` aliases the
 `xmpp-httpx` package specifier (the example consumes the library by name) to

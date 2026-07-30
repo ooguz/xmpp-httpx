@@ -1,3 +1,5 @@
+import { extensionApi } from "./ext.js";
+
 export interface ConnectionSettings {
   service: string;
   jid: string;
@@ -7,10 +9,7 @@ export interface ConnectionSettings {
 const KEYS = ["service", "jid", "password"];
 
 function extensionStorage() {
-  const api =
-    (typeof browser !== "undefined" ? browser : undefined) ??
-    (typeof chrome !== "undefined" ? chrome : undefined);
-  return api?.storage?.local;
+  return extensionApi()?.storage?.local;
 }
 
 /** Extension storage.local, with a localStorage fallback so the page also
