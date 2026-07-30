@@ -16,7 +16,12 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "dist",
-    "noEmit": true
+    "noEmit": true,
+    // test/browser/ exercises examples/webext/src, which imports the library by
+    // package name; resolve that to the sources so typecheck needs no dist/.
+    "paths": {
+      "xmpp-httpx": ["./src/index.ts"]
+    }
   },
   "include": ["src", "test", "types", "*.config.ts"]
 }

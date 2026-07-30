@@ -98,9 +98,14 @@ security review still open.
 
 Goal: from demo to daily-drivable.
 
-- [ ] **Sanitized CSS subset** (L) — allow `<style>`/inline styles through a
-  CSS sanitizer (strip `url()`, `@import`, expressions); biggest visible
-  quality jump.
+- [x] **Sanitized CSS subset** (L) — `<style>` blocks and `style=` attributes
+  now pass through a CSSOM-based sanitizer (`examples/webext/src/sanitize-css.ts`):
+  rule allow-list, every `url()` through a resolver, `@import`/`expression()`
+  refused, `</style>` re-escaped. httpx `url()` references are *fetched* into
+  `blob:` URLs like images (two-pass render), so background images and
+  webfonts served over XMPP actually render. Tested in real Chromium
+  (`test/browser/`); reasoning in [browser-extension.md](browser-extension.md)
+  §CSS.
 - [ ] **Progressive rendering** (M) — render HTML as it streams (the body is
   already a stream; today the extension buffers `text()` first).
 - [ ] **Forms** (M) — GET/`application/x-www-form-urlencoded` POST forms

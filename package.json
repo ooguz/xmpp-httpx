@@ -82,6 +82,7 @@
     "@vitest/browser-playwright": "^4.1.10",
     "@xmpp/client": "^0.14.0",
     "@xmpp/component": "^0.14.0",
+    "dompurify": "^3.4.12",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "fast-check": "^4.8.0",

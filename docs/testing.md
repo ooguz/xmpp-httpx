@@ -9,9 +9,13 @@ suite against a real Prosody.
 
 | Project | Command | Environment | What runs |
 |---|---|---|---|
-| `node` | `npm test` | Node | `test/unit/**` + `test/integration/**` |
-| `browser` | `npm run test:browser` | headless Chromium (Playwright) | the exact same suites |
+| `node` | `npm test` | Node | `test/unit/**` + `test/integration/**` + `test/integration-node/**` |
+| `browser` | `npm run test:browser` | headless Chromium (Playwright) | the same suites, plus `test/browser/**` |
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
+
+Two directories are single-project by nature: `test/integration-node/`
+(raw TCP sockets for SOCKS5 bytestreams) runs only under `node`, and
+`test/browser/` (real CSSOM, `DOMParser`, blob URLs) only under `browser`.
 
 The `browser` project exists to *prove* the browser-safe-core rule: the full
 protocol stack — codec, chunk reassembly, IBB flow control, sipub/jingle
@@ -90,6 +94,26 @@ between two real users — the sipub/jingle cases connect extra `bob`
 resources because one session supports one `HttpxServer`) and
 `component-gateway.e2e.test.ts` (`httpxFetch` → XEP-0114 component serving
 `demo-site.ts`).
+
+## Browser-only suites (`test/browser/`)
+
+The WebExtension's rendering pipeline is security-critical and pure
+browser-API code, so it is tested in real Chromium rather than by hand:
+
+- `sanitize-css.test.ts` — the CSSOM sanitizer: at-rule allow-listing,
+  `url()` resolution and rejection, `expression()`/`behavior` removal,
+  `!important` preservation, `</style>` re-escaping, idempotence, and the
+  resolver contract the render pipeline depends on.
+- `render.test.ts` — `renderHtml`/`renderPlain` against a real sandboxed
+  iframe: scripts/forms/handlers stripped, page CSS surviving, httpx images
+  and CSS references fetched into `blob:` URLs (deduplicated, revoked on
+  cleanup), unavailable resources degrading instead of throwing, relative
+  links resolved, and click interception reporting only `httpx:` navigation.
+
+These import `examples/webext/src/*` directly; `vitest.config.ts` aliases the
+`xmpp-httpx` package specifier (the example consumes the library by name) to
+`src/index.ts`, and `tsconfig.json` mirrors that with `paths`, so neither a
+built `dist/` nor an install inside the example is required.
 
 ## Fuzzing & adversarial testing
 

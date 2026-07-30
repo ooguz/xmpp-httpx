@@ -29,6 +29,7 @@ protocol-handler events → open/focus `browser.html#<url>`.
 | `src/connection.ts` | `Connection` class owning the `@xmpp/client` WebSocket session; exposes it as the library's `XmppSession` |
 | `src/settings.ts` | Credentials in `storage.local` (localStorage fallback so the page also works as a plain tab during development) |
 | `src/render.ts` | The sanitized rendering pipeline (below) |
+| `src/sanitize-css.ts` | CSSOM-based CSS sanitizer for `<style>` blocks and `style=` attributes |
 | `public/background.js` | Omnibox/action/protocol-handler routing only |
 | `manifest.base.json` + `scripts/make-manifests.mjs` | Shared manifest + per-target patches → `dist/chromium/`, `dist/firefox/` |
 
@@ -55,11 +56,17 @@ Fetched HTML is hostile input. The pipeline:
 
 ```
 httpxFetch(url) → DOMPurify.sanitize        (WHOLE_DOCUMENT; FORBID: script,
-                                             style, link, form, iframe, object,
+                                             link, form, iframe, object,
                                              embed, base, meta …; custom
                                              ALLOWED_URI_REGEXP admitting httpx:)
-   → DOMParser → resolve <a href>/<img src> with resolveHttpxUrl(base, ref)
-   → fetch httpx images via httpxFetch → blob: URLs (revoked on navigation)
+   → DOMParser
+   → CSS pass 1: sanitize <style>/style= , resolve every url() to absolute,
+                 collect the httpx references they need
+   → resolve <a href>/<img src> with resolveHttpxUrl(base, ref)
+   → fetch httpx images + CSS references via httpxFetch → blob: URLs
+     (one fetch per URL, revoked on navigation)
+   → CSS pass 2: swap httpx url() for its blob: URL, drop the declaration
+                 when the resource never arrived
    → srcdoc into <iframe sandbox="allow-same-origin">   ← NO allow-scripts
    → parent intercepts clicks in iframe.contentDocument:
         httpx:// → in-place navigation; http(s):// → real new tab
@@ -73,11 +80,46 @@ Security reasoning, layer by layer:
   clicks — no code is ever injected into the untrusted document.
 - The extension page's CSP (`script-src 'self'`) is inherited by `srcdoc`
   as a second layer against inline script.
-- Styles are stripped along with scripts (CSS `url()` is an exfiltration
-  channel); a readable default style is injected instead. Sanitized-CSS
-  support is a roadmap item.
 - `blob:` image URLs are minted by the parent and revoked on every
   navigation.
+
+### CSS (`src/sanitize-css.ts`)
+
+Page CSS is allowed, but DOMPurify does not parse CSS, so it is re-sanitized
+separately — on **CSSOM** (`new CSSStyleSheet().replaceSync(css)`) rather than
+a bundled CSS parser, so the browser's own parser normalizes hostile input and
+constructed sheets refuse `@import` by spec.
+
+- **Allow-list on the way out.** Only style, `@font-face`, `@keyframes`,
+  `@media` and `@supports` rules are re-serialized; everything else
+  (`@namespace`, `@page`, `@counter-style`, anything unknown) is simply not
+  emitted. Output is built from kept rules instead of calling `deleteRule`
+  because CSSOM *refuses* to delete an `@namespace` rule while other rules
+  exist — an unremovable rule must never become a kept rule.
+- **Every `url()` goes through a resolver.** References are resolved against
+  the page URL, then admitted only for `httpx:`/`https:`/`data:`/`blob:`;
+  anything else (including `javascript:`) drops the whole declaration. That
+  is deliberately the same trust set the pipeline already applies to `<img>`.
+- **httpx references are fetched, not passed through** — nothing inside the
+  scriptless iframe can speak XMPP, so a surviving `httpx:` URL would just be
+  a broken image. Hence the two passes: pass 1 discovers them, pass 2
+  substitutes the parent-minted `blob:` URL. Which is why the sanitizer is
+  idempotent: running it over its own output changes nothing but resolver
+  substitutions.
+- `expression()`, `behavior`, `-moz-binding` are dropped explicitly — dead
+  vectors in modern engines, cheap to keep refusing.
+- A CSS *string value* may contain `</style`, which CSSOM serializes with the
+  `<` unescaped; re-serializing the document into `srcdoc` would then close
+  the raw-text element early and inject real markup. The serializer re-escapes
+  it as `\3c /style`. (A literal `</style>` in the source HTML is a non-issue:
+  the HTML parser closes the element before the sanitizer ever sees it.)
+- Input is capped (512 KiB per block) to bound parser work, and the injected
+  default style is **prepended** so page CSS wins on equal specificity.
+
+Residual risk, accepted: CSS can hit third-party `https:` origins (fonts,
+background images), which pings that origin on page load. This is exactly what
+an `<img src="https://…">` in the same document already does; anyone wanting
+zero third-party traffic should restrict the resolver to `httpx:` only.
 
 Non-HTML responses render directly: images via blob URL, text in a `<pre>`.
 
@@ -111,11 +153,15 @@ is exercised headlessly against `scripts/demo-gateway.mjs` (see
 [testing.md](testing.md)); interactive testing in real browser windows is
 manual by nature.
 
+The rendering pipeline itself — sanitization, CSS, subresource fetching, blob
+lifetime, click interception — is unit-tested in real Chromium under the
+`browser` vitest project (`test/browser/`, see [testing.md](testing.md)).
+
 ## Known limitations (deliberate, demo-grade)
 
 - Credentials in extension storage in plaintext; `ws://` only for the local
   dev Prosody — production must be `wss://`.
-- No CSS from fetched pages; no forms/uploads; no favicon/title from
-  `<meta>`; one page per tab (no in-extension tab strip).
+- No forms/uploads; no favicon/title from `<meta>`; one page per tab (no
+  in-extension tab strip).
 - `web-ext lint` flags Firefox's upcoming data-consent manifest key and the
   (sanitized) `srcdoc` assignment as warnings — both acknowledged.
