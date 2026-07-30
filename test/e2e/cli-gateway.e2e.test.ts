@@ -13,6 +13,7 @@ import { connectUser, type E2eClient } from "./e2e-env.js";
  */
 
 const ORIGIN_PORT = 18081;
+const METRICS_PORT = 19100;
 const GATEWAY_JID = "httpx.localhost";
 
 describe("gateway CLI serving an HTTP origin", () => {
@@ -58,6 +59,8 @@ describe("gateway CLI serving an HTTP origin", () => {
         GATEWAY_JID,
         "--allow",
         "alice@localhost",
+        "--metrics-port",
+        String(METRICS_PORT),
         "--quiet",
       ],
       env: { XMPP_HTTPX_SECRET: "e2e-secret" },
@@ -69,6 +72,7 @@ describe("gateway CLI serving an HTTP origin", () => {
     gateway = await startGateway(parsed.config, {
       info: () => {},
       error: (message, err) => console.error("[cli-e2e]", message, err),
+      request: () => {},
     });
 
     alice = await connectUser("alice", "e2e-alice", "cli-allowed");
@@ -117,6 +121,24 @@ describe("gateway CLI serving an HTTP origin", () => {
     expect(await response.text()).toBe("echo:note=%C3%BCber");
   });
 
+  it("exposes Prometheus metrics for the traffic it served", async () => {
+    const response = await fetch(`http://127.0.0.1:${gateway.metricsPort!}/metrics`);
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("httpx_gateway_stream_up 1");
+    expect(body).toMatch(
+      /httpx_gateway_requests_total\{method="GET",status="200"\} [1-9]/,
+    );
+    expect(body).toContain('httpx_gateway_requests_total{method="GET",status="404"} 1');
+    expect(body).toMatch(/httpx_gateway_request_duration_seconds_count [1-9]/);
+  });
+
+  it("reports itself healthy while the stream is up", async () => {
+    const response = await fetch(`http://127.0.0.1:${gateway.metricsPort!}/healthz`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("ok");
+  });
+
   it("refuses a JID that is not on the allowlist", async () => {
     seen.length = 0;
     await expect(
@@ -124,5 +146,12 @@ describe("gateway CLI serving an HTTP origin", () => {
     ).rejects.toMatchObject({ code: "forbidden", httpEquivalent: 403 });
     // The origin must never have been contacted for a refused requester.
     expect(seen).toEqual([]);
+
+    const metrics = await (
+      await fetch(`http://127.0.0.1:${gateway.metricsPort!}/metrics`)
+    ).text();
+    expect(metrics).toContain(
+      'httpx_gateway_requests_denied_total{jid="bob@localhost"} 1',
+    );
   });
 });

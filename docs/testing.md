@@ -14,7 +14,8 @@ suite against a real Prosody.
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
 
 Two directories are single-project by nature: `test/integration-node/`
-(raw TCP sockets for SOCKS5 bytestreams) runs only under `node`, and
+(raw TCP sockets for SOCKS5 bytestreams, and the CLI's metrics/health listener
+over a real socket) runs only under `node`, and
 `test/browser/` (real CSSOM, `DOMParser`, blob URLs) only under `browser`.
 
 The `browser` project exists to *prove* the browser-safe-core rule: the full
@@ -45,7 +46,11 @@ together.
   resolution; stanza-condition mapping.
 - `cli-config.test.ts` — the gateway CLI's config layer, which is pure on
   purpose: mode validation, the refusal to start without an authorization
-  decision, byte/mechanism parsing, and flags > env > file precedence.
+  decision, byte/mechanism/port parsing, and flags > env > file precedence.
+- `cli-observability.test.ts` — the metrics registry's exposition format
+  (cumulative histogram buckets, label escaping, HELP/TYPE for every metric,
+  bare-JID denial labels) and both logger formats, with the clock and sinks
+  injected so the output is asserted exactly.
 
 ## Integration harness (`test/integration/mock-session.ts`)
 

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { configPathOf, parseConfig, USAGE } from "./config.js";
-import { startGateway, type Logger } from "./gateway.js";
+import { startGateway } from "./gateway.js";
+import { createLogger } from "./logger.js";
 
 /**
  * The `xmpp-httpx-gateway` entry point: everything Node-specific and
@@ -9,17 +10,6 @@ import { startGateway, type Logger } from "./gateway.js";
  */
 
 const VERSION = "0.6.0";
-
-function makeLogger(quiet: boolean): Logger {
-  return {
-    info(message) {
-      if (!quiet) console.log(`[gateway] ${message}`);
-    },
-    error(message, error) {
-      console.error(`[gateway] ${message}`, error ?? "");
-    },
-  };
-}
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -55,12 +45,15 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const log = makeLogger(result.config.quiet);
+  const log = createLogger({
+    format: result.config.logFormat,
+    quiet: result.config.quiet,
+  });
   for (const warning of result.warnings) log.error(`warning: ${warning}`);
 
   let gateway;
   try {
-    gateway = await startGateway(result.config, log);
+    gateway = await startGateway(result.config, log, { version: VERSION });
   } catch (err) {
     log.error("failed to start", err);
     return 1;

@@ -3,5 +3,6 @@
   "domain": "web.localhost",
   "origin": "http://origin:80",
   "allow": ["alice@localhost"],
-  "maxStanzaBytes": 65536
+  "maxStanzaBytes": 65536,
+  "metricsPort": 9100
 }

@@ -37,6 +37,12 @@ export interface GatewayConfig {
   followRedirects: boolean;
   maxRequestBodyBytes?: number;
   quiet: boolean;
+  /** Human lines, or one JSON object per line for a log shipper. */
+  logFormat: "text" | "json";
+  /** Port for /metrics and /healthz; omitted means no listener at all. */
+  metricsPort?: number;
+  /** Interface for that listener. Defaults to loopback, deliberately. */
+  metricsAddress: string;
 }
 
 export type ParseResult =
@@ -62,6 +68,9 @@ interface Fields {
   followRedirects?: boolean;
   maxRequestBodyBytes?: number;
   quiet?: boolean;
+  logFormat?: "text" | "json";
+  metricsPort?: number;
+  metricsAddress?: string;
   configPath?: string;
 }
 
@@ -92,6 +101,9 @@ Options:
   --no-jid-header         do not tell the origin who is asking
   --no-compress           disable gzip/deflate Content-Encoding
   --follow-redirects      follow origin redirects instead of forwarding them
+  --log-format <fmt>      text (default) or json, one object per line
+  --metrics-port <port>   serve /metrics (Prometheus) and /healthz
+  --metrics-address <ip>  interface for that listener (default 127.0.0.1)
   --quiet                 log only errors
   -h, --help              this text
   -v, --version           print the version
@@ -114,6 +126,9 @@ const FLAGS_WITH_VALUE = new Set([
   "--prefer",
   "--max-body",
   "--jid-header",
+  "--log-format",
+  "--metrics-port",
+  "--metrics-address",
 ]);
 
 /** Parses argv into raw fields; unknown flags and bad numbers are errors. */
@@ -190,6 +205,21 @@ function parseArgv(argv: readonly string[]): { fields: Fields; errors: string[] 
         break;
       case "--no-compress":
         fields.compress = false;
+        break;
+      case "--log-format":
+        if (value === "text" || value === "json") fields.logFormat = value;
+        else errors.push(`--log-format must be "text" or "json", got "${value!}"`);
+        break;
+      case "--metrics-port": {
+        const parsed = number(value!);
+        if (parsed !== undefined) {
+          if (parsed > 65535) errors.push(`--metrics-port out of range: ${parsed}`);
+          else fields.metricsPort = parsed;
+        }
+        break;
+      }
+      case "--metrics-address":
+        fields.metricsAddress = value!; // FLAGS_WITH_VALUE guarantees it
         break;
       case "--follow-redirects":
         fields.followRedirects = true;
@@ -276,6 +306,14 @@ function parseFile(contents: string): { fields: Fields; errors: string[] } {
   assign(fields, "compress", boolean("compress"));
   assign(fields, "followRedirects", boolean("followRedirects"));
   assign(fields, "quiet", boolean("quiet"));
+  assign(fields, "metricsPort", positive("metricsPort"));
+  assign(fields, "metricsAddress", string("metricsAddress"));
+
+  const logFormat = source["logFormat"];
+  if (logFormat !== undefined) {
+    if (logFormat === "text" || logFormat === "json") fields.logFormat = logFormat;
+    else errors.push('config "logFormat" must be "text" or "json"');
+  }
   assign(fields, "preferredStreams", stringList("preferredStreams"));
 
   const allow = source["allow"];
@@ -390,6 +428,9 @@ export function parseConfig(inputs: ParseInputs): ParseResult {
     jidHeader: fields.jidHeader ?? "x-httpx-from",
     followRedirects: fields.followRedirects ?? false,
     quiet: fields.quiet ?? false,
+    logFormat: fields.logFormat ?? "text",
+    metricsAddress: fields.metricsAddress ?? "127.0.0.1",
+    ...(fields.metricsPort !== undefined ? { metricsPort: fields.metricsPort } : {}),
     ...(fields.domain !== undefined ? { domain: fields.domain } : {}),
     ...(fields.secret !== undefined ? { secret: fields.secret } : {}),
     ...(fields.jid !== undefined ? { jid: fields.jid } : {}),

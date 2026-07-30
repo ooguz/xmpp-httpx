@@ -43,8 +43,12 @@ RUN printf '{"name":"xmpp-httpx-gateway-image","private":true}' > package.json \
 
 USER node
 
-# No HEALTHCHECK: the gateway exposes no port of its own — it is an XMPP client,
-# not a server. Liveness needs the metrics endpoint that is still a roadmap item.
+# No HEALTHCHECK here, because whether one is possible depends on the runtime
+# configuration: with `--metrics-port 9100` the gateway serves /healthz (200
+# while the XMPP stream is up, 503 otherwise) and a probe is one line —
+#   HEALTHCHECK CMD wget -q -O /dev/null http://127.0.0.1:9100/healthz
+# — but baking that in would mark a perfectly healthy gateway unhealthy when
+# metrics are switched off. examples/docker/ wires it up at the compose level.
 #
 # The CLI installs SIGTERM/SIGINT handlers, so `docker stop` closes the XMPP
 # stream cleanly even with node as PID 1 (no init shim needed).

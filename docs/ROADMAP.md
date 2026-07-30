@@ -218,17 +218,25 @@ Goal: `createOriginProxyHandler` is one line away from being a deployable
   [`examples/docker/`](../examples/docker/) pairs it with Prosody and an nginx
   origin that is *not* published to the host: two commands to a browsable
   `httpx://web.localhost/`, verified end to end.
-- [ ] **Observability** (M) — structured logs, request counters/latency
-  histograms (Prometheus text endpoint), `onError` wired to logs.
+- [x] **Observability** (M) — `--log-format json` (one object per line, fields as
+  data), `--metrics-port` serving Prometheus text plus `/healthz`, bound to
+  loopback by default since the metrics label denied JIDs. Counters for
+  requests (by method and status), denials (by *bare* JID — a resource is
+  unbounded cardinality), and errors by kind; a duration histogram; and
+  `httpx_gateway_stream_up`, which is the only real liveness fact a gateway with
+  no request port has. `onError` and the authorization policy are both wrapped,
+  so handler errors and refusals are counted, not just returned. The registry is
+  hand-rolled to keep the dependency count at one. This also unblocked the
+  container healthcheck that the Docker item had to skip.
 - [ ] **Static-site mode** (S) — serve a directory (the demo-site handler
   generalized) without an HTTP origin.
 - [ ] **Rate limiting** (S) — token bucket per bare JID in front of
   `authorize`.
 
-Acceptance: mostly met — `docker compose up` in `examples/docker/` fronts a real
-site over XMPP (verified: nginx pages *and* nginx's own 404 travelling back to a
-client), README quickstart is four commands. Scrapeable metrics are the open
-item.
+Acceptance: met — `docker compose up` in `examples/docker/` fronts a real site
+over XMPP (verified: nginx pages *and* nginx's own 404 travelling back to a
+client), the gateway container reports `(healthy)` from its own `/healthz`, and
+metrics are scrapeable. README quickstart is four commands.
 
 ## Phase 12 — Beyond the WebExtension
 

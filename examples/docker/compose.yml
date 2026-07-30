@@ -48,6 +48,18 @@ services:
       - ./gateway.json:/etc/xmpp-httpx/gateway.json:ro
     command: ["--config", "/etc/xmpp-httpx/gateway.json"]
     restart: unless-stopped
+    # gateway.json enables /metrics and /healthz on port 9100, bound to
+    # loopback *inside the container* — all a healthcheck needs, and it keeps
+    # the endpoints (they label denied JIDs) off the network. To scrape from
+    # Prometheus, set "metricsAddress": "0.0.0.0" in gateway.json and let the
+    # scraper reach gateway:9100 over this compose network; publishing the port
+    # to the host is rarely what you want.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9100/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     depends_on:
       prosody:
         condition: service_healthy

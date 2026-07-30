@@ -100,13 +100,72 @@ by default, or followed at the gateway with `--follow-redirects`.
 `SIGINT`/`SIGTERM` shut the XMPP stream down cleanly rather than dropping the
 socket, so a supervisor (systemd, Docker, k8s) can restart it without the server
 waiting on a dead connection. Requests are logged one line each
-(`from method resource → status (ms)`); `--quiet` keeps only errors. Structured
-logs and metrics are a separate roadmap item.
+(`from method resource → status (ms)`); see Observability below for JSON logs and
+metrics.
 
 The CLI ships as a `bin` of the main package, so `npx xmpp-httpx-gateway` works
 without a global install. It needs `@xmpp/component` (or `@xmpp/client`) present
 — those are optional peers of the library, and the CLI says exactly which one to
 install if it is missing rather than printing a stack trace.
+
+## Observability
+
+### Logs
+
+`--log-format text` (default) is one line per event, the request line staying
+compact:
+
+```
+[gateway] alice@example.org/laptop GET /page → 200 (12ms)
+```
+
+`--log-format json` emits one object per line, with the fields as *data* rather
+than interpolated into a sentence — which is the point, since a log shipper can
+then index `status` and `durationMs`:
+
+```json
+{"ts":"2026-07-30T20:16:59.024Z","level":"info","msg":"request","from":"alice@example.org/laptop","method":"GET","resource":"/page","status":200,"durationMs":23}
+```
+
+Errors carry `error`, `errorName` and (when present) `cause`. `--quiet` keeps
+errors only; both formats write info to stdout and errors to stderr.
+
+### Metrics and health
+
+`--metrics-port 9100` starts the gateway's **only** listening socket, serving:
+
+| Path | What |
+|---|---|
+| `/metrics` | Prometheus text format |
+| `/healthz` | 200 while the XMPP stream is up, 503 otherwise |
+
+It binds **127.0.0.1 by default** — deliberately, since the metrics label denied
+JIDs and that is not something to publish by accident. `--metrics-address
+0.0.0.0` opens it up when a scraper needs to reach it from elsewhere.
+
+```
+httpx_gateway_build_info{version="0.6.0"} 1
+httpx_gateway_stream_up 1
+httpx_gateway_requests_total{method="GET",status="200"} 3
+httpx_gateway_requests_denied_total{jid="eve@example.org"} 1
+httpx_gateway_errors_total{kind="origin"} 1
+httpx_gateway_request_duration_seconds_bucket{le="0.05"} 2
+httpx_gateway_request_duration_seconds_sum 0.061
+httpx_gateway_request_duration_seconds_count 3
+```
+
+Two deliberate choices in there:
+
+- **Denials are labelled by bare JID**, never the full one — a resource is
+  unbounded cardinality, and metrics are not an audit log. The request log has
+  the full JID.
+- `httpx_gateway_stream_up` is the only real liveness fact the gateway has: it
+  serves no port for requests, so "can it reach XMPP" *is* its health. That is
+  what `/healthz` reports, and what makes a container healthcheck possible.
+
+The registry is hand-rolled (~80 lines) rather than pulling in a Prometheus
+client: this package ships with one runtime dependency and the CLI should not
+change that.
 
 ## Docker
 
@@ -130,9 +189,13 @@ orchestrator can tell a crash from a misconfiguration. `docker stop` sends
 SIGTERM, which the CLI handles by closing the XMPP stream and exiting 0 — no
 init shim is needed even with node as PID 1, and there is no kill-timeout wait.
 
-There is no `HEALTHCHECK`: the gateway exposes no port of its own — it is an XMPP
-client, not a server — so a real liveness probe needs the metrics endpoint that
-is still a roadmap item.
+The image declares no `HEALTHCHECK`, because whether one is possible depends on
+the configuration: with `--metrics-port` set, `/healthz` makes it a one-liner
+(`wget -q -O /dev/null http://127.0.0.1:9100/healthz`), but baking that in would
+mark a perfectly healthy gateway unhealthy when metrics are switched off.
+[`examples/docker/`](../examples/docker/) wires it up at the compose level, where
+the config is known — probing loopback *inside* the container, so the endpoints
+stay off the network.
 
 [`examples/docker/`](../examples/docker/) is a runnable three-container
 deployment (nginx origin + Prosody + this gateway) with the origin deliberately

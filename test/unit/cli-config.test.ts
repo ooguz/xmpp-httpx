@@ -172,6 +172,73 @@ describe("parseConfig — options", () => {
   });
 });
 
+describe("parseConfig — observability", () => {
+  it("defaults to text logs and no metrics listener", () => {
+    const { config } = ok(BASE);
+    expect(config.logFormat).toBe("text");
+    expect(config.metricsPort).toBeUndefined();
+    expect(config.metricsAddress).toBe("127.0.0.1");
+  });
+
+  it("takes a log format and rejects anything else", () => {
+    expect(ok([...BASE, "--log-format", "json"]).config.logFormat).toBe("json");
+    expect(errors([...BASE, "--log-format", "yaml"])).toContain(
+      '--log-format must be "text" or "json", got "yaml"',
+    );
+  });
+
+  it("enables the metrics listener on request, loopback unless told otherwise", () => {
+    const { config } = ok([...BASE, "--metrics-port", "9100"]);
+    expect(config.metricsPort).toBe(9100);
+    expect(config.metricsAddress).toBe("127.0.0.1");
+
+    const wide = ok([...BASE, "--metrics-port", "9100", "--metrics-address", "0.0.0.0"]);
+    expect(wide.config.metricsAddress).toBe("0.0.0.0");
+  });
+
+  it("rejects impossible ports", () => {
+    expect(errors([...BASE, "--metrics-port", "70000"])).toContain(
+      "--metrics-port out of range: 70000",
+    );
+    expect(errors([...BASE, "--metrics-port", "0"])).toContain(
+      '--metrics-port needs a positive integer, got "0"',
+    );
+  });
+
+  it("reads them from a config file too", () => {
+    const { config } = ok([], {
+      configFile: JSON.stringify({
+        service: "xmpp://s",
+        origin: "http://o",
+        domain: "d",
+        secret: "x",
+        allow: "all",
+        logFormat: "json",
+        metricsPort: 9101,
+        metricsAddress: "0.0.0.0",
+      }),
+    });
+    expect(config.logFormat).toBe("json");
+    expect(config.metricsPort).toBe(9101);
+    expect(config.metricsAddress).toBe("0.0.0.0");
+  });
+
+  it("rejects a bad logFormat in the file", () => {
+    expect(
+      errors([], {
+        configFile: JSON.stringify({
+          service: "s",
+          origin: "o",
+          domain: "d",
+          secret: "x",
+          allow: "all",
+          logFormat: "xml",
+        }),
+      }),
+    ).toContain('config "logFormat" must be "text" or "json"');
+  });
+});
+
 describe("parseConfig — sources and precedence", () => {
   const FILE = JSON.stringify({
     service: "xmpp://file:5347",

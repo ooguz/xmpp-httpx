@@ -8,6 +8,10 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **Gateway observability**: `--log-format json`, and `--metrics-port` serving
+  Prometheus metrics plus a `/healthz` liveness endpoint (loopback-bound by
+  default). Requests, denials and errors are counted; request duration is a
+  histogram; `httpx_gateway_stream_up` reports XMPP connectivity.
 - **Docker image** for the gateway (`Dockerfile`), plus a runnable
   three-container compose example in `examples/docker/` (nginx origin + Prosody
   + gateway). The runtime stage installs the `npm pack` tarball, so the image
