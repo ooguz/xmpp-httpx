@@ -11,7 +11,7 @@ import {
   type HttpxServerOptions,
 } from "../../src/server/server.js";
 import { bytesFromStream, streamFromBytes } from "../../src/util/bytes.js";
-import { createSessionPair } from "./mock-session.js";
+import { createSessionPair } from "../../src/testing/mock-session.js";
 
 function patternBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);

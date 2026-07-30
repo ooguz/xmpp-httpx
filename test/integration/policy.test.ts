@@ -5,7 +5,7 @@ import {
   manualPolicy,
   presencePolicy,
 } from "../../src/server/policy.js";
-import { createSessionPair } from "./mock-session.js";
+import { createSessionPair } from "../../src/testing/mock-session.js";
 
 const REQ = { method: "GET", resource: "/", to: "server@example.org" };
 

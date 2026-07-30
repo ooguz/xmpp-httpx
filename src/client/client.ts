@@ -305,7 +305,7 @@ export class HttpxClient {
 
     // Transparently undo known content codings; unknown codings are left
     // for the caller along with their header.
-    let body = this.#openResponseBody(peer, resp.data, signal);
+    let body = this.#openResponseBody(peer, resp.data, signal, init.idleTimeoutMs);
     const codings = parseContentEncodings(resp.headers.get("content-encoding"));
     if (body && codings && codings.length > 0) {
       body = decompressStream(body, codings);
@@ -366,8 +366,12 @@ export class HttpxClient {
     peer: string,
     data: DataDescriptor | undefined,
     signal?: AbortSignal | undefined,
+    /** Per-request override; falls back to the client option, then the default. */
+    idleTimeoutMs?: number | undefined,
   ): ReadableStream<Uint8Array> | null {
     if (data === undefined) return null;
+    const idle =
+      idleTimeoutMs ?? this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
 
     if (isInline(data)) {
       return streamFromBytes(inlineToBytes(data));
@@ -378,7 +382,7 @@ export class HttpxClient {
         streamId: data.streamId,
         maxBufferedBytes:
           this.#options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES,
-        idleTimeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+        idleTimeoutMs: idle,
       });
       if (signal) {
         const onAbort = () =>
@@ -396,7 +400,7 @@ export class HttpxClient {
       const sid = data.sid;
       const body = deferredStream(async () => {
         const incoming = await this.#ibb.expectIncoming(peer, sid, {
-          timeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+          timeoutMs: idle,
         });
         return incoming.readable;
       });
@@ -406,7 +410,7 @@ export class HttpxClient {
     if (data.kind === "sipub" || data.kind === "jingle") {
       const transport = this.#registry.get(data.kind)!;
       const body = transport.receive(peer, data, {
-        timeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+        timeoutMs: idle,
         ...(this.#options.from !== undefined
           ? { ourJid: this.#options.from }
           : {}),

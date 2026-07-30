@@ -9,6 +9,8 @@ export interface HttpxFetchInit extends Omit<RequestInit, "body"> {
   session: XmppSession | HttpxClient;
   body?: BodyInit | null;
   timeoutMs?: number;
+  /** Per-request idle timeout for a streamed response body. */
+  idleTimeoutMs?: number;
 }
 
 const defaultClients = new WeakMap<object, HttpxClient>();
@@ -95,6 +97,9 @@ export async function httpxFetch(
     headers,
     ...(body !== undefined ? { body } : {}),
     ...(init.timeoutMs !== undefined ? { timeoutMs: init.timeoutMs } : {}),
+    ...(init.idleTimeoutMs !== undefined
+      ? { idleTimeoutMs: init.idleTimeoutMs }
+      : {}),
     ...(init.signal !== undefined && init.signal !== null
       ? { signal: init.signal }
       : {}),

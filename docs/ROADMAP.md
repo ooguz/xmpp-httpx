@@ -263,12 +263,20 @@ Goal: a real `httpx://` address bar somewhere.
 
 ## Cross-cutting quick wins (any time)
 
-- [ ] `HttpxResponse.formData()`/content-negotiation helpers (S)
-- [ ] `AbortSignal.timeout()` examples + per-request `idleTimeoutMs` override (S)
-- [ ] Turkish README translation (S)
-- [ ] `npm run demo` one-command: compose up + register + gateway (S)
-- [ ] Export a `MockSessionPair` test helper from `xmpp-httpx/testing` for
-  downstream users (M)
+- [x] `HttpxResponse.formData()` — delegates to the platform's parser, so
+  multipart works without a multipart parser living here — plus
+  `parseAccept`/`negotiateContentType` for content negotiation that gets
+  q-values, wildcards and "most specific pattern wins" right (S)
+- [x] Per-request `idleTimeoutMs` override (client and `httpxFetch`), and
+  `AbortSignal.timeout()` covered by both docs and tests (S)
+- [x] Turkish README — [README.tr.md](../README.tr.md), linked both ways (S)
+- [x] `npm run demo` — Prosody up, users registered, library built if needed,
+  demo site served, next steps printed; `npm run demo -- --down` to stop (S)
+- [x] `xmpp-httpx/testing` — the integration harness (`createSessionPair`,
+  `MockSession`, `deliverHook` fault injection) moved to `src/testing/` and
+  published as a subpath, so downstream code can be tested without an XMPP
+  server. It is the same harness this library's own suite runs on, which is what
+  keeps it honest (M)
 
 ## Suggested order
 

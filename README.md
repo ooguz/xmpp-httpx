@@ -6,6 +6,8 @@
 
 TypeScript implementation of [XEP-0332: HTTP over XMPP Transport](https://xmpp.org/extensions/xep-0332.html) — tunnel HTTP requests and responses through XMPP, for Node.js and browsers.
 
+*[Türkçe belge: README.tr.md](README.tr.md)*
+
 XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implementation of the kind the XEP explicitly encourages, built as the foundation for a browser that navigates `httpx://user@domain/path` URLs.
 
 **Documentation:**
@@ -30,6 +32,8 @@ XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implemen
 - SHIM headers ([XEP-0131](https://xmpp.org/extensions/xep-0131.html)), `httpx://` URL parsing, service discovery ([XEP-0030](https://xmpp.org/extensions/xep-0030.html)), entity caps ([XEP-0115](https://xmpp.org/extensions/xep-0115.html)) with presence-based capability caching
 - A `fetch()`-shaped API returning real WHATWG `Response` objects with streaming bodies
 - A reverse-proxy handler for gateway deployments (`xmpp-httpx/node`)
+- A ready-made gateway CLI (`xmpp-httpx-gateway`) with a Docker image
+- A published test harness (`xmpp-httpx/testing`) so downstream code can be tested without an XMPP server
 
 ## Install
 
@@ -65,7 +69,9 @@ const resp = await httpx.request("webserver@example.org", {
 console.log(resp.statusCode, await resp.json());
 ```
 
-Response bodies are `ReadableStream<Uint8Array>` — large bodies stream progressively regardless of which mechanism (inline, chunked messages, IBB) carried them. XMPP-level failures (forbidden, timeout, unreachable) throw `HttpxError` with an `httpEquivalent` status; only real `<resp>` stanzas produce responses.
+Response bodies are `ReadableStream<Uint8Array>` — large bodies stream progressively regardless of which mechanism (inline, chunked messages, IBB) carried them, and `.text()`, `.json()`, `.bytes()`, `.xml()` and `.formData()` are all there. XMPP-level failures (forbidden, timeout, unreachable) throw `HttpxError` with an `httpEquivalent` status; only real `<resp>` stanzas produce responses.
+
+Per request you can set `timeoutMs` (the IQ deadline), `idleTimeoutMs` (the gap allowed between pieces of a streamed body), and a `signal` — `AbortSignal.timeout(5000)` is all a caller needs for an overall deadline.
 
 ## Server
 
@@ -88,7 +94,7 @@ server.handle(async (req) => {
 server.start();
 ```
 
-Authorization is **deny-all by default** per the XEP's security considerations — pass `allowAll()`, `allowList(...)`, or your own policy. The server picks the response encoding automatically: small bodies inline into the IQ, large ones stream via IBB or chunked messages, honoring the requester's advertised `maxChunkSize` and mechanism flags.
+Authorization is **deny-all by default** per the XEP's security considerations — pass `allowAll()`, `allowList(...)`, or your own policy. `withRateLimit(handler, { ratePerSecond })` throttles per requester, and `negotiateContentType(req.headers.get("accept"), ["text/html", "application/json"])` picks a representation without getting q-values wrong. The server picks the response encoding automatically: small bodies inline into the IQ, large ones stream via IBB or chunked messages, honoring the requester's advertised `maxChunkSize` and mechanism flags.
 
 For gateway deployments (an XMPP component fronting a real web server):
 
@@ -138,9 +144,17 @@ npm install
 npm run lint && npm run typecheck   # ESLint + tsc
 npm test                            # vitest: unit + in-memory integration suite
 npm run build                       # emit dist/
+npm run demo                        # Prosody + demo site, one command
 ```
 
-The integration suite runs both endpoints against an in-memory stanza router (`test/integration/mock-session.ts`) with fault injection (reordered chunk delivery), so the full protocol — including IBB flow control — is exercised without a real XMPP server.
+The integration suite runs both endpoints against an in-memory stanza router with fault injection (reordered chunk delivery), so the full protocol — including IBB flow control — is exercised without a real XMPP server. That harness is published as **`xmpp-httpx/testing`**, so your own handlers can be tested the same way:
+
+```js
+import { createSessionPair } from "xmpp-httpx/testing";
+
+const [clientSession, serverSession] = createSessionPair("alice@example.org/pc", "web@example.org");
+// …put an HttpxServer on one, an HttpxClient on the other, and assert.
+```
 
 ## The browser
 
@@ -148,11 +162,14 @@ The integration suite runs both endpoints against an in-memory stanza router (`t
 
 ## Roadmap
 
-- Gateway as a product: Docker image, observability, static-site mode, rate limiting
-- Jingle S5B (XEP-0260) transport candidate negotiation
-- Beyond the extension: an Electron shell with a real `httpx://` address bar
+Done so far: the protocol with all seven transports, the browser extension, and
+the gateway (CLI, Docker image, metrics, static-site mode, rate limiting). Next:
 
-Full detail, including what is already done, in [docs/ROADMAP.md](docs/ROADMAP.md).
+- An Electron shell, for a real `httpx://` address bar rather than an extension page
+- Jingle S5B (XEP-0260) transport candidate negotiation
+- Publishing to npm and the extension stores
+
+Full detail, including everything already finished, in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

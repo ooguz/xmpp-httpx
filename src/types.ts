@@ -44,5 +44,11 @@ export interface HttpxRequestInit {
   body?: HttpxBodyInit;
   /** Overrides the client's default IQ timeout for this request. */
   timeoutMs?: number;
+  /**
+   * Overrides the client's idle timeout for *this* response body — the gap
+   * allowed between chunks/blocks of a streamed body. Useful per request
+   * because a slow large download and a quick page have different patience.
+   */
+  idleTimeoutMs?: number;
   signal?: AbortSignal;
 }

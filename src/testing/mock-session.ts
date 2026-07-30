@@ -1,9 +1,14 @@
 import xml, { Element } from "@xmpp/xml";
 import parse from "@xmpp/xml/lib/parse.js";
-import { NS_STANZAS } from "../../src/constants.js";
-import type { IqContext, IqHandler, XmppSession } from "../../src/session.js";
+import { NS_STANZAS } from "../constants.js";
+import type { IqContext, IqHandler, XmppSession } from "../session.js";
 
 /**
+ * A test double for `XmppSession`, published as `xmpp-httpx/testing` so
+ * downstream users can exercise their own handlers and clients without an XMPP
+ * server. It is the very harness this library's own integration suite runs on,
+ * which is the point: if it drifted from real semantics, those tests would fail.
+ *
  * In-memory XmppSession pair mirroring @xmpp/client's iqCaller/iqCallee
  * semantics: async handlers, error elements → IQ errors, thrown handlers →
  * internal-server-error, no matching handler → service-unavailable.

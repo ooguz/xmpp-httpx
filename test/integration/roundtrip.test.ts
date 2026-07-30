@@ -11,7 +11,7 @@ import {
   type HttpxServerOptions,
 } from "../../src/server/server.js";
 import { bytesFromStream } from "../../src/util/bytes.js";
-import { createSessionPair, MockSession } from "./mock-session.js";
+import { createSessionPair, MockSession } from "../../src/testing/mock-session.js";
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {

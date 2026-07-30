@@ -45,6 +45,12 @@ together.
   recomputation.
 - `urls.test.ts`, `errors.test.ts` — URL codec incl. browser-style relative
   resolution; stanza-condition mapping.
+- `negotiate.test.ts` — `Accept` parsing and content negotiation: q ordering,
+  wildcards, `q=0` as a refusal, ties broken by the server's own preference, and
+  the RFC 9110 rule that the most specific pattern governs (so `*/*;q=0.1` does
+  not drag down an explicit `text/html`).
+- `response-form.test.ts` — `HttpxResponse.formData()` over urlencoded *and*
+  multipart bodies, plus the two ways it refuses clearly.
 - `rate-limit.test.ts` — the token bucket with a hand-moved clock: burst then
   429, `Retry-After` never earlier than a token exists, refill capped at the
   burst, per-bare-JID isolation (including that extra resources do *not*
@@ -58,7 +64,12 @@ together.
   bare-JID denial labels) and both logger formats, with the clock and sinks
   injected so the output is asserted exactly.
 
-## Integration harness (`test/integration/mock-session.ts`)
+## Integration harness (`src/testing/mock-session.ts`)
+
+**Published as `xmpp-httpx/testing`.** It lives in `src/` rather than `test/`
+precisely so downstream users get it: testing an httpx handler otherwise means
+standing up an XMPP server. It is the same harness this suite runs on, so it
+cannot quietly drift from real semantics — these tests would fail first.
 
 `createSessionPair()` returns two in-memory `XmppSession`s that mirror
 @xmpp/iq semantics faithfully: async handlers, error elements → IQ errors,

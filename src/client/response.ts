@@ -57,6 +57,30 @@ export class HttpxResponse {
     return JSON.parse(await this.text()) as unknown;
   }
 
+  /**
+   * Parses the body as form data. Delegates to the platform's own parser, which
+   * handles both `application/x-www-form-urlencoded` and `multipart/form-data`
+   * — reimplementing multipart here would be a liability, not a feature.
+   */
+  async formData(): Promise<FormData> {
+    if (!this.headers.has("content-type")) {
+      throw new HttpxError(
+        "protocol-error",
+        "formData() needs a Content-Type on the response",
+      );
+    }
+    // arrayBuffer(), not bytes(): a Uint8Array over a SharedArrayBuffer-capable
+    // buffer is not a BodyInit, and this already returns a tight copy.
+    const body = await this.arrayBuffer();
+    try {
+      return await new Response(body, { headers: this.headers }).formData();
+    } catch (err) {
+      throw new HttpxError("protocol-error", "response body is not form data", {
+        cause: err,
+      });
+    }
+  }
+
   /** Parses the body as a single XML element; null for an empty body. */
   async xml(): Promise<Element | null> {
     const text = (await this.text()).trim();

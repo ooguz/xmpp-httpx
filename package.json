@@ -42,6 +42,10 @@
     "./node": {
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {
@@ -54,6 +58,7 @@
     "test:watch": "vitest --project node",
     "bench": "vitest bench --project node --run",
     "smoke": "node scripts/smoke-browser.mjs",
+    "demo": "node scripts/demo.mjs",
     "docs:api": "typedoc",
     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build"
   },

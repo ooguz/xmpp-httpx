@@ -8,6 +8,16 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **`xmpp-httpx/testing`**: the in-memory session-pair harness this library's own
+  integration suite runs on is now a published subpath (`createSessionPair`,
+  `MockSession`, and the `deliverHook` fault-injection seam), so downstream
+  handlers and clients can be tested without an XMPP server.
+- **`HttpxResponse.formData()`** (urlencoded and multipart, via the platform's
+  own parser), and **`parseAccept`/`negotiateContentType`** for content
+  negotiation.
+- **Per-request `idleTimeoutMs`** on `HttpxClient.request` and `httpxFetch`,
+  overriding the client-wide default for one streamed body.
+- **`npm run demo`**: Prosody, demo users and the demo site in one command.
 - **`withRateLimit(handler, options)`**: per-bare-JID token bucket, exported from
   the library and wired to the CLI's `--rate`/`--burst`. Throttled requests get a
   real 429 with `Retry-After` (not a 403), and never reach the origin.

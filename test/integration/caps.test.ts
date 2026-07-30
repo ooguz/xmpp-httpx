@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildCapsElement, computeCapsVer } from "../../src/caps.js";
 import { NS_DISCO_INFO } from "../../src/constants.js";
 import { advertiseHttpx, DiscoCache } from "../../src/discovery.js";
-import { createSessionPair } from "./mock-session.js";
+import { createSessionPair } from "../../src/testing/mock-session.js";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {

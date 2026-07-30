@@ -14,7 +14,7 @@ import {
   streamFromBytes,
   textEncoder,
 } from "../../src/util/bytes.js";
-import { createSessionPair, type MockSession } from "./mock-session.js";
+import { createSessionPair, type MockSession } from "../../src/testing/mock-session.js";
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {

@@ -4,7 +4,7 @@ import type { StreamMechanism } from "../../src/transport/select.js";
 import { allowAll } from "../../src/server/policy.js";
 import { HttpxServer } from "../../src/server/server.js";
 import { bytesFromStream } from "../../src/util/bytes.js";
-import { createSessionPair } from "../integration/mock-session.js";
+import { createSessionPair } from "../../src/testing/mock-session.js";
 
 /**
  * Throughput of each transport over the in-memory session pair (no network,

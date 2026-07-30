@@ -17,7 +17,7 @@ import {
   type Socks5Adapter,
 } from "../../src/socks5/protocol.js";
 import { bytesFromStream, streamFromBytes } from "../../src/util/bytes.js";
-import { createSessionPair } from "../integration/mock-session.js";
+import { createSessionPair } from "../../src/testing/mock-session.js";
 
 /**
  * SOCKS5 Bytestreams (XEP-0065) needs real TCP sockets, so it can never run

@@ -7,7 +7,7 @@ import {
   type HttpxHandler,
   type HttpxServerOptions,
 } from "../../src/server/server.js";
-import { createSessionPair } from "./mock-session.js";
+import { createSessionPair } from "../../src/testing/mock-session.js";
 
 /** A stream that trickles `total` bytes in small parts, one per macrotask. */
 function slowStream(total: number, partSize = 2048): ReadableStream<Uint8Array> {
@@ -154,6 +154,64 @@ describe("abort and cancel propagation", () => {
     }
     expect(caught).toBeInstanceOf(HttpxError);
     expect((caught as HttpxError).code).toBe("timeout");
+  });
+
+  it("a per-request idleTimeoutMs overrides a generous client default", async () => {
+    const { client, serverSession } = setup(
+      () => ({ status: 200, body: slowStream(500_000) }),
+      { preferredStreams: ["chunkedBase64"] },
+      // The client would wait a minute; the request asks for a tenth of a second.
+      { idleTimeoutMs: 60_000 },
+    );
+
+    let delivered = 0;
+    serverSession.deliverHook = (stanza, deliver) => {
+      if (stanza.getName() === "message" && ++delivered > 3) return; // link dead
+      queueMicrotask(deliver);
+    };
+
+    const started = Date.now();
+    const resp = await client.request("server@example.org", { idleTimeoutMs: 100 });
+    const reader = resp.body!.getReader();
+    let caught: unknown;
+    try {
+      for (let i = 0; i < 1000; i++) {
+        const { done } = await reader.read();
+        if (done) throw new Error("stream ended cleanly despite dead link");
+      }
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HttpxError);
+    expect((caught as HttpxError).code).toBe("timeout");
+    // Proof the per-request value won: the client default would still be waiting.
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("AbortSignal.timeout() is all a caller needs for a deadline", async () => {
+    const { client } = setup(
+      () => ({ status: 200, body: slowStream(500_000) }),
+      { preferredStreams: ["chunkedBase64"] },
+    );
+
+    // One signal covers the whole operation, so the deadline may land during the
+    // IQ exchange or midway through the body — either way the caller sees the
+    // same "aborted", which is the contract worth pinning.
+    const download = async (): Promise<void> => {
+      const resp = await client.request("server@example.org", {
+        signal: AbortSignal.timeout(120),
+      });
+      const reader = resp.body!.getReader();
+      for (let i = 0; i < 1000; i++) {
+        const { done } = await reader.read();
+        if (done) throw new Error("stream ended before the deadline");
+      }
+    };
+
+    await expect(download()).rejects.toMatchObject({
+      name: "HttpxError",
+      code: "aborted",
+    });
   });
 
   it("client.close() aborts live chunked streams", async () => {
