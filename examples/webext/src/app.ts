@@ -7,8 +7,19 @@ import {
   type CacheState,
 } from "./cache.js";
 import { Connection } from "./connection.js";
+import { buildDrawerList, type DrawerEntry } from "./drawer.js";
 import { filenameFor, isAttachment, isRenderableType, saveBlob } from "./download.js";
 import type { FormRefusal, FormSubmission } from "./forms.js";
+import {
+  clearHistory,
+  isBookmarked,
+  listBookmarks,
+  listHistory,
+  recordVisit,
+  removeBookmark,
+  removeVisit,
+  toggleBookmark,
+} from "./history.js";
 import { extractPageMeta, type PageMeta } from "./page-meta.js";
 import { renderError, renderHtml, renderPlain } from "./render.js";
 import { loadSettings, saveSettings, type ConnectionSettings } from "./settings.js";
@@ -21,6 +32,11 @@ const viewport = $<HTMLIFrameElement>("viewport");
 const status = $<HTMLSpanElement>("status");
 const settingsDialog = $<HTMLDialogElement>("settings");
 const cacheChip = $<HTMLSpanElement>("cacheState");
+const bookmarkBtn = $<HTMLButtonElement>("bookmark");
+const drawer = $<HTMLElement>("drawer");
+const drawerBtn = $<HTMLButtonElement>("drawerBtn");
+const drawerList = $<HTMLUListElement>("drawerList");
+const drawerEmpty = $<HTMLParagraphElement>("drawerEmpty");
 const favicon = $<HTMLLinkElement>("favicon");
 const DEFAULT_FAVICON = favicon.getAttribute("href") ?? "";
 
@@ -33,6 +49,8 @@ connection.onStateChange = (state) => {
 
 let cleanupPage: (() => void) | undefined;
 let revokeFavicon: (() => void) | undefined;
+/** Title of the page on screen, for history and bookmarks. */
+let pageTitle: string | undefined;
 
 /** "ext+httpx://…" (Firefox protocol handler) → "httpx://…". */
 function normalizeUrl(raw: string): string {
@@ -176,7 +194,10 @@ async function load(
 
     if (isAttachment(disposition) || !isRenderableType(contentType)) {
       await download(href, response, disposition);
-    } else if (contentType.includes("text/html")) {
+      return; // a saved file is not a page in history
+    }
+
+    if (contentType.includes("text/html")) {
       const html = await response.text();
       const meta = extractPageMeta(html, href);
       cleanupPage = await renderHtml(html, href, {
@@ -186,15 +207,24 @@ async function load(
         onSubmit: (submission, reason) => void submitForm(submission, reason),
       });
       applyPageMeta(href, meta);
+      pageTitle = meta.title;
     } else {
       cleanupPage = await renderPlain(contentType, await response.blob(), {
         iframe: viewport,
       });
+      pageTitle = undefined;
     }
 
     if (!response.ok) {
       document.title = `(${response.status}) ${document.title}`;
     }
+
+    // POST results are not addressable, so they are not history either.
+    if (init.method !== "POST" && response.ok) {
+      await recordVisit(href, pageTitle);
+      if (isDrawerOpen()) await renderDrawer();
+    }
+    await refreshBookmarkButton(href);
   } catch (err) {
     await showError(`Failed to load ${href}`, err);
   }
@@ -283,6 +313,53 @@ async function loadFavicon(iconUrl: string): Promise<void> {
   }
 }
 
+// --- history & bookmarks drawer ------------------------------------------------
+
+type DrawerPanel = "history" | "bookmarks";
+let panel: DrawerPanel = "history";
+
+async function refreshBookmarkButton(href: string): Promise<void> {
+  const marked = await isBookmarked(href);
+  bookmarkBtn.textContent = marked ? "★" : "☆";
+  bookmarkBtn.setAttribute("aria-pressed", String(marked));
+  bookmarkBtn.title = marked ? "Remove bookmark" : "Bookmark this page";
+}
+
+async function renderDrawer(): Promise<void> {
+  const entries: DrawerEntry[] =
+    panel === "history"
+      ? (await listHistory()).map((e) => ({ url: e.url, title: e.title }))
+      : (await listBookmarks()).map((m) => ({ url: m.url, title: m.title }));
+
+  drawerList.replaceChildren(
+    buildDrawerList(entries, {
+      onOpen: (url) => void navigate(url),
+      onRemove: (url) =>
+        void (async () => {
+          if (panel === "history") await removeVisit(url);
+          else await removeBookmark(url);
+          await renderDrawer();
+          await refreshBookmarkButton(address.value);
+        })(),
+      removeLabel: panel === "history" ? "Forget this page" : "Remove bookmark",
+    }),
+  );
+  drawerEmpty.hidden = entries.length > 0;
+  drawerEmpty.textContent =
+    panel === "history" ? "No pages visited yet." : "No bookmarks yet.";
+}
+
+/** `hidden` is typed `boolean | "until-found"`, so compare rather than negate. */
+function isDrawerOpen(): boolean {
+  return drawer.hidden === false;
+}
+
+function setDrawerOpen(open: boolean): void {
+  drawer.hidden = !open;
+  drawerBtn.setAttribute("aria-expanded", String(open));
+  if (open) void renderDrawer();
+}
+
 async function showError(message: string, err: unknown): Promise<void> {
   console.error("[httpx]", message, err);
   resetPage(address.value || message);
@@ -317,6 +394,40 @@ $<HTMLButtonElement>("clearCache").addEventListener("click", () => {
 });
 $<HTMLButtonElement>("settingsBtn").addEventListener("click", () => {
   settingsDialog.showModal();
+});
+
+drawerBtn.addEventListener("click", () => setDrawerOpen(!isDrawerOpen()));
+$<HTMLButtonElement>("drawerClose").addEventListener("click", () =>
+  setDrawerOpen(false),
+);
+$<HTMLButtonElement>("drawerClear").addEventListener("click", () => {
+  void (async () => {
+    if (panel === "history") await clearHistory();
+    else for (const mark of await listBookmarks()) await removeBookmark(mark.url);
+    await renderDrawer();
+    await refreshBookmarkButton(address.value);
+  })();
+});
+for (const tab of $<HTMLDivElement>("drawerTabs").querySelectorAll("[data-panel]")) {
+  tab.addEventListener("click", () => {
+    panel = tab.getAttribute("data-panel") === "bookmarks" ? "bookmarks" : "history";
+    for (const other of $<HTMLDivElement>("drawerTabs").querySelectorAll("[data-panel]")) {
+      other.setAttribute("aria-selected", String(other === tab));
+    }
+    $<HTMLButtonElement>("drawerClear").title =
+      panel === "history" ? "Clear history" : "Remove all bookmarks";
+    void renderDrawer();
+  });
+}
+
+bookmarkBtn.addEventListener("click", () => {
+  void (async () => {
+    const href = address.value;
+    if (href === "") return;
+    await toggleBookmark(href, pageTitle);
+    await refreshBookmarkButton(href);
+    if (isDrawerOpen() && panel === "bookmarks") await renderDrawer();
+  })();
 });
 
 window.addEventListener("hashchange", () => {

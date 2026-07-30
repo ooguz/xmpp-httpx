@@ -24,7 +24,7 @@ protocol-handler events → open/focus `browser.html#<url>`.
 
 | File | Role |
 |---|---|
-| `browser.html` + `src/style.css` | Browser chrome: address bar, back/forward/reload, connection status pill, settings dialog, content iframe |
+| `browser.html` + `src/style.css` | Browser chrome: address bar, back/forward/reload, bookmark star, history drawer, cache + connection chips, settings dialog, content iframe |
 | `src/app.ts` | Navigation state machine: URL normalization (`ext+httpx://` → `httpx://`), hash-based history, fetch-and-render orchestration, settings wiring |
 | `src/connection.ts` | `Connection` class owning the `@xmpp/client` WebSocket session; exposes it as the library's `XmppSession` |
 | `src/settings.ts` | Credentials in `storage.local` (localStorage fallback so the page also works as a plain tab during development) |
@@ -34,6 +34,8 @@ protocol-handler events → open/focus `browser.html#<url>`.
 | `src/download.ts` | Renderable-vs-downloadable content types, `Content-Disposition` filenames, `downloads.download` |
 | `src/forms.ts` | GET/urlencoded-POST form model: action resolution, refusals, submission construction |
 | `src/cache.ts` | HTTP cache on the Cache API: freshness, revalidation, invalidation |
+| `src/history.ts` | Visit history + bookmarks in `storage.local`, with title normalization |
+| `src/drawer.ts` | Builds the history/bookmarks list DOM (extracted so it can be tested directly) |
 | `src/ext.ts` | `browser`/`chrome`/absent API lookup shared by the modules that need it |
 | `public/background.js` | Omnibox/action/protocol-handler routing only |
 | `manifest.base.json` + `scripts/make-manifests.mjs` | Shared manifest + per-target patches → `dist/chromium/`, `dist/firefox/` |
@@ -227,6 +229,26 @@ on a transport this expensive.
 
 The chrome shows which of those happened (`cache` / `304` / `network`), and
 the settings dialog can clear the cache.
+
+### History and bookmarks (`src/history.ts`, `src/drawer.ts`)
+
+Visits and bookmarks live in `storage.local` (with the same `localStorage`
+fallback the settings use, so the page still works as a plain tab). Revisiting a
+URL updates its title and timestamp and moves it to the front instead of adding
+a row — the drawer lists *pages*, not page views — and history is capped at 500
+entries. POST results and downloads are deliberately not recorded: neither is a
+URL you can return to. Fragments are stripped and non-httpx URLs refused, so
+every row is something the browser can actually revisit.
+
+The security-relevant part is small but worth naming: **page titles are the only
+hostile string this project puts into the extension's own DOM** rather than into
+the sandboxed iframe. So titles are normalized on the way in (whitespace
+collapsed, capped at 200 characters, falling back to the URL) and the list is
+built exclusively with `textContent` — no page-supplied string is ever parsed as
+markup. That list building lives in `src/drawer.ts` rather than `app.ts`
+precisely so a test can hold it to that promise
+(`test/browser/drawer.test.ts`). Stored state is also re-validated on read, so a
+corrupt or hand-edited store degrades to an empty list instead of a broken UI.
 
 ## Manifest strategy
 

@@ -26,6 +26,8 @@ manifest variants.
   dialog can clear it.
 - **Downloads** for content the viewport can't display, **page titles and
   favicons** from the fetched document, and error pages with working retry.
+- **History and bookmarks** in a drawer (☰), backed by `storage.local`, with a
+  bookmark star (☆/★) in the chrome.
 
 ## Address-bar reality (2026)
 

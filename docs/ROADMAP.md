@@ -141,8 +141,17 @@ Goal: from demo to daily-drivable.
   `cache`/`304`/`network` chip in the chrome. The demo site now serves ETags
   and answers `If-None-Match` with a real 304, covered end-to-end against
   Prosody.
-- [ ] **Tab strip + history UI** (M) — multiple pages per window, a
-  history/bookmarks drawer backed by `storage.local`.
+- [x] **History + bookmarks UI** (M) — split out of the tab-strip item below and
+  shipped: a drawer (`src/history.ts` + `src/drawer.ts`) over `storage.local`,
+  dedup-and-bump on revisit, a 500-entry cap, a bookmark star in the chrome, and
+  per-entry removal. POST results and downloads are not recorded — neither is a
+  URL you can return to. Page titles are the only hostile string that reaches
+  the extension's own DOM, so they are normalized on the way in and rendered
+  only via `textContent` (pinned by `test/browser/drawer.test.ts`).
+- [ ] **Tab strip** (M) — multiple pages per window. Needs one iframe per tab
+  sharing the single XMPP connection, plus per-tab blob/cleanup ownership (today
+  `cleanupPage` is a single module-level slot) — a bigger change than the
+  history drawer it was originally bundled with.
 - [x] **Downloads** (S) — non-renderable content types (and any
   `Content-Disposition: attachment`) → `downloads.download` with a blob URL,
   `<a download>` fallback outside an extension context; filenames from

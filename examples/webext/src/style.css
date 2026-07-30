@@ -73,6 +73,98 @@ main {
   border: 0;
   background: Canvas;
 }
+#drawer {
+  width: min(24rem, 45vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  overflow: hidden;
+}
+#drawer header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+#drawerTabs {
+  display: flex;
+  gap: 0.2rem;
+  flex: 1;
+}
+#drawer header button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+#drawerTabs button[aria-selected="true"] {
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-weight: 600;
+}
+#drawerList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+#drawerList li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+#drawerList button.entry {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+}
+#drawerList button.entry:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+#drawerList .title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#drawerList .url {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#drawerList button.remove {
+  font: inherit;
+  background: transparent;
+  border: 0;
+  opacity: 0.5;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+}
+#drawerList button.remove:hover {
+  opacity: 1;
+}
+#drawerEmpty {
+  padding: 1rem 0.7rem;
+  opacity: 0.6;
+  font-size: 0.85rem;
+}
+#bookmark[aria-pressed="true"] {
+  color: #b8860b;
+}
 dialog {
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   border-radius: 10px;

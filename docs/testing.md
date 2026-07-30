@@ -128,10 +128,20 @@ browser-API code, so it is tested in real Chromium rather than by hand:
   cached body, lifetime refreshed from the 304's headers, body replacement,
   invalidation, and recovery from a 304 with nothing cached.
 
-These import `examples/webext/src/*` directly; `vitest.config.ts` aliases the
-`xmpp-httpx` package specifier (the example consumes the library by name) to
-`src/index.ts`, and `tsconfig.json` mirrors that with `paths`, so neither a
-built `dist/` nor an install inside the example is required.
+- `history.test.ts` — visit history and bookmarks over the `localStorage`
+  fallback: dedup-and-bump on revisit, ordering, the 500-entry cap, URL
+  normalization, refusal of non-httpx URLs, independence of bookmarks from
+  history, and self-healing from corrupt stored state.
+- `drawer.test.ts` — the drawer list DOM: a hostile page title stays text (no
+  element is created from it), and open/remove clicks report the right URL.
+
+These import `examples/webext/src/*` directly; the **browser project** aliases
+the `xmpp-httpx` package specifier (the example consumes the library by name) to
+`src/index.ts`, and `tsconfig.json` mirrors that with `paths`, so neither a built
+`dist/` nor an install inside the example is required. Note the alias must sit on
+the *project* config: `test.projects` entries do not inherit a root-level
+`resolve`, and an install inside the example masks the difference locally — it
+was a CI-only failure until the alias moved.
 
 ## Fuzzing & adversarial testing
 

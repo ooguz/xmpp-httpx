@@ -26,6 +26,12 @@
           placeholder="httpx://webserver@example.org/index.html"
         />
       </form>
+      <button id="bookmark" title="Bookmark this page" aria-label="Bookmark" aria-pressed="false">
+        ☆
+      </button>
+      <button id="drawerBtn" title="History and bookmarks" aria-label="History" aria-expanded="false">
+        ☰
+      </button>
       <span id="cacheState" class="chip" hidden></span>
       <span id="status" class="chip" data-state="disconnected" title="XMPP connection">offline</span>
       <button id="settingsBtn" title="Connection settings" aria-label="Settings">⚙</button>
@@ -59,6 +65,24 @@
 
     <main>
       <iframe id="viewport" sandbox="allow-same-origin" title="page content"></iframe>
+
+      <!-- Entries are built with textContent: page titles are hostile input. -->
+      <aside id="drawer" hidden aria-label="History and bookmarks">
+        <header>
+          <div id="drawerTabs" role="tablist">
+            <button id="tabHistory" role="tab" aria-selected="true" data-panel="history">
+              History
+            </button>
+            <button id="tabBookmarks" role="tab" aria-selected="false" data-panel="bookmarks">
+              Bookmarks
+            </button>
+          </div>
+          <button id="drawerClear" title="Clear history">Clear</button>
+          <button id="drawerClose" title="Close" aria-label="Close drawer">✕</button>
+        </header>
+        <ul id="drawerList"></ul>
+        <p id="drawerEmpty" hidden>Nothing here yet.</p>
+      </aside>
     </main>
 
     <script type="module" src="./src/app.ts"></script>
