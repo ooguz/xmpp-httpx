@@ -14,18 +14,23 @@ const BROWSER_SAFE = [
 const NODE_ONLY = ["test/integration-node/**/*.test.ts"];
 const BROWSER_ONLY = ["test/browser/**/*.test.ts"];
 
-export default defineConfig({
+// The webext sources under test import the library by package name (the example
+// links it with `file:../..`); map it to the sources so the browser tests need
+// no install inside the example and no built dist/. This must live on the
+// *project* config — `test.projects` entries do not inherit a root-level
+// `resolve`, and the example's own node_modules would otherwise mask that.
+const WEBEXT_ALIAS = {
   resolve: {
     alias: [
-      // The webext sources under test import the library by package name (the
-      // example links it with `file:../..`); map it to the sources so the
-      // browser tests need no example-level install and no built dist/.
       {
         find: /^xmpp-httpx$/,
         replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
       },
     ],
   },
+};
+
+export default defineConfig({
   test: {
     testTimeout: 10_000,
     projects: [
@@ -40,6 +45,7 @@ export default defineConfig({
         },
       },
       {
+        ...WEBEXT_ALIAS,
         test: {
           name: "browser",
           include: [...BROWSER_SAFE, ...BROWSER_ONLY],
