@@ -7,7 +7,7 @@ browser-mode CI, and the Firefox/Chromium WebExtension browser
 (`examples/webext/`) — which now renders page CSS, submits forms, caches with
 real 304 revalidation, saves downloads, and shows page titles and favicons.
 Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
-are done bar Jingle S5B (whose protocol layer landed separately); phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
+are done, Jingle S5B included; phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
 image, observability, static-site mode, rate limiting); phase 12 is done (the
 Electron shell, with OS-handler and mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
@@ -50,35 +50,31 @@ Goal: close the remaining spec-adjacent gaps.
   candidates, automatic IBB fallback on the same sid when every candidate
   is unreachable. Details in [architecture.md](architecture.md) §SOCKS5
   Bytestreams.
-- [~] **Jingle S5B — XEP-0260** (L) — **protocol layer done, session wiring not.**
+- [x] **Jingle S5B — XEP-0260** (L) — candidate negotiation end to end.
+  `src/socks5/jingle-s5b.ts` (wire format, §2.1 priorities, §2.2 `dstaddr`, §2.4
+  reconciliation), `src/jingle/s5b-negotiation.ts` (the per-session waiting, all
+  of it bounded), and the `JingleManager` wiring: candidates offered in a
+  `transport-info`, `candidate-used`/`candidate-error` both ways, proxy
+  activation, and `transport-replace` to IBB when the negotiation cannot
+  produce a usable candidate. Active whenever a `Socks5Adapter` is supplied;
+  plain IBB otherwise, so browsers are unaffected.
 
-  Done and tested (`src/socks5/jingle-s5b.ts`, 24 unit tests): the
-  `<transport>`/`<candidate>` codec, `<candidate-used>`/`<candidate-error>`/
-  `<activated>`/`<proxy-error>` payloads, the §2.1 priority arithmetic, the §2.2
-  `dstaddr`, candidate ordering, and `resolve()` — the §2.4 reconciliation of the
-  two sides' reports, including the tie-break reading that keeps both peers
-  choosing the *same* candidate instead of deadlocking (asserted from both
-  viewpoints; interpretation recorded in
-  [protocol-notes.md](protocol-notes.md)). Exported, so it is usable on its own.
+  Two things worth knowing, both in [protocol-notes.md](protocol-notes.md): the
+  candidates cannot ride in the session-initiate (XEP-0332 embeds that element
+  in `<data>`, built synchronously, while gathering candidates is async), and the
+  negotiation is deliberately asymmetric — the initiator reports
+  `candidate-error` for the responder's candidates because writing over a socket
+  it dialled itself is outside the adapter's surface. It therefore always
+  resolves to an initiator-offered candidate or to IBB, which is conformant but
+  narrower than a symmetric implementation; adding a connect-and-write direction
+  to the adapter would widen it without touching the negotiation.
 
-  Remaining, and deliberately not rushed — this transport carries response
-  bodies, so a half-built state machine is worse than none:
-
-  1. `JingleManager.offer()` building an s5b transport (candidates from a
-     `Socks5Adapter`) instead of the IBB one, when an adapter is present.
-  2. `session-accept` carrying the responder's candidates, and a real
-     `transport-info` handler — today `transport-info` is acked and ignored, and
-     non-IBB transports are declined outright.
-  3. The connect race on both sides (the adapter's `connect()` already does the
-     client half; `candidatesFor()` already hosts a direct streamhost), then
-     exchanging reports and applying `resolve()`.
-  4. Proxy activation for a winning `type='proxy'` candidate: an XEP-0065
-     `<activate/>` IQ to the proxy, then `<activated cid=…/>`.
-  5. `transport-replace` → IBB when `resolve()` returns `fallback`, plus the
-     accept/reject of a replacement.
-  6. Tests: the full choreography over the mock pair with a fake adapter, and a
-     real-socket case in `test/integration-node/` alongside the existing
-     XEP-0065 one.
+  Tested at three levels: 24 unit tests on the pure layer (including that both
+  peers resolve a tie to the *same* candidate), 6 choreography tests over the
+  mock pair with a fake bytestream (happy path plus all three fallback routes),
+  and 2 real-socket tests in `test/integration-node/` where a body crosses an
+  actual negotiated TCP connection — with `openOutgoing` asserted to have been
+  called, so a silent regression into IBB fails loudly.
 - [x] **Stanza-size budgets** (S) — `stanzaBudgets(maxStanzaBytes)` helper
   (v0.6.0); explicit `maxChunkSize` advertisements now honored to the spec
   max. Automatic XEP-0478 probing stays with the application, which owns
@@ -89,10 +85,10 @@ Goal: close the remaining spec-adjacent gaps.
   ([architecture.md](architecture.md) §Sessions), dead-link-mid-stream
   surfaces as a tested `timeout` error; bodies are never silently truncated.
 
-Acceptance (met for the shipped items): compressed bodies round-trip with
-wire-level proof (zero chunk stanzas for a 288 KB text body); the sipub/S5B
-transport now exists, so the phase 9 throughput benchmark comparing it
-against IBB on Node is unblocked but still not run.
+Acceptance (met): compressed bodies round-trip with wire-level proof (zero chunk
+stanzas for a 288 KB text body), and SOCKS5 bytestreams exist on both the sipub
+(XEP-0065) and jingle (XEP-0260) paths. The phase 9 throughput benchmark
+comparing them against IBB on Node is unblocked but still not run.
 
 ## Phase 9 — Hardening & performance
 

@@ -231,6 +231,65 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
     expect(openOutgoing).toHaveBeenCalledTimes(1);
   });
 
+  it("streams a jingle body over a negotiated s5b candidate (XEP-0260)", async () => {
+    // The same self-hosted-streamhost shape as above, but negotiated through
+    // Jingle rather than SI: session-initiate → accept → candidates in a
+    // transport-info → candidate-used → bytes over a real TCP socket.
+    const body = patternBytes(140_000);
+    const openOutgoing = vi.fn();
+
+    const { client } = setup(
+      () => ({
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+        body: streamFromBytes(body),
+      }),
+      (serverSession) => {
+        const realAdapter = createSocks5Adapter(serverSession, {
+          listen: { host: "127.0.0.1", port: 0 },
+        });
+        cleanups.push(() => realAdapter.release());
+        const serverSocks5: Socks5Adapter = {
+          ...realAdapter,
+          openOutgoing: (...args) => {
+            openOutgoing(...args);
+            return realAdapter.openOutgoing(...args);
+          },
+        };
+        return { preferredStreams: ["jingle"], socks5: serverSocks5 };
+      },
+      (clientSession) => ({ socks5: createSocks5Adapter(clientSession, {}) }),
+    );
+
+    const resp = await client.request("server@example.org", { resource: "/jingle-s5b" });
+    expect(resp.statusCode).toBe(200);
+    expect(await bytesFromStream(resp.body!)).toEqual(body);
+    // Proof it was the negotiated socket and not a quiet IBB fallback.
+    expect(openOutgoing).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to IBB when a jingle s5b negotiation finds no reachable candidate", async () => {
+    const body = patternBytes(80_000);
+    const { client } = setup(
+      () => ({
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+        body: streamFromBytes(body),
+      }),
+      (serverSession) => ({
+        preferredStreams: ["jingle"],
+        // No listener and no proxy: the adapter has nothing to offer, so the
+        // negotiation must end in transport-replace and the body still arrive.
+        socks5: createSocks5Adapter(serverSession, {}),
+      }),
+      (clientSession) => ({ socks5: createSocks5Adapter(clientSession, {}) }),
+    );
+
+    const resp = await client.request("server@example.org", { resource: "/fallback" });
+    expect(resp.statusCode).toBe(200);
+    expect(await bytesFromStream(resp.body!)).toEqual(body);
+  });
+
   it("falls back to IBB when every SOCKS5 candidate is unreachable", async () => {
     // A closed local port: connections are refused immediately.
     const closed = net.createServer();

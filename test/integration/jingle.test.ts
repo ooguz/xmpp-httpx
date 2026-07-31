@@ -1,4 +1,4 @@
-import xml from "@xmpp/xml";
+import xml, { type Element } from "@xmpp/xml";
 import { afterEach, describe, expect, it } from "vitest";
 import { HttpxClient } from "../../src/client/client.js";
 import { NS_JINGLE } from "../../src/constants.js";
@@ -102,11 +102,62 @@ describe("jingle transport (XEP-0166/0234 over XEP-0261 IBB)", () => {
       ),
     );
 
+    // s5b is implemented now, so the offer is *accepted* rather than declined.
+    // With no SOCKS5 adapter on this side there is nothing to try, so we report
+    // candidate-error and wait for the initiator to replace the transport with
+    // IBB. Nothing here does that, so the receive ends in a timeout — but the
+    // stanzas on the way are the point, so they are captured and answered by
+    // hand (the synthetic initiate has no session on the peer to answer them).
+    const sent: Element[] = [];
+    a.deliverHook = (stanza, deliver) => {
+      if (stanza.getName() !== "iq" || stanza.attrs["type"] !== "set") {
+        deliver();
+        return;
+      }
+      sent.push(stanza);
+      // Ack it ourselves so the responder's flow proceeds to the next step.
+      a.receive(
+        xml("iq", {
+          type: "result",
+          id: stanza.attrs["id"],
+          from: "server@example.org",
+          to: a.jid.toString(),
+        }),
+      );
+    };
+
     const err = await bytesFromStream(
-      receiver.receive("server@example.org", initiate),
+      receiver.receive("server@example.org", initiate, { timeoutMs: 250 }),
     ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpxError);
-    expect((err as HttpxError).code).toBe("not-implemented");
+    expect((err as HttpxError).code).toBe("timeout");
+
+    const actions = sent.map((iq) => iq.getChild("jingle")?.attrs["action"]);
+    expect(actions).toContain("session-accept");
+    expect(actions).toContain("transport-info");
+
+    // The accept echoes an s5b transport, with no candidates of our own.
+    const accept = sent.find(
+      (iq) => iq.getChild("jingle")?.attrs["action"] === "session-accept",
+    )!;
+    const acceptTransport = accept
+      .getChild("jingle")!
+      .getChild("content")!
+      .getChild("transport", "urn:xmpp:jingle:transports:s5b:1");
+    expect(acceptTransport).toBeDefined();
+    expect(acceptTransport!.getChildren("candidate")).toHaveLength(0);
+
+    // And the transport-info is a candidate-error, since we had nothing to try.
+    const info = sent.find(
+      (iq) => iq.getChild("jingle")?.attrs["action"] === "transport-info",
+    )!;
+    expect(
+      info
+        .getChild("jingle")!
+        .getChild("content")!
+        .getChild("transport", "urn:xmpp:jingle:transports:s5b:1")!
+        .getChild("candidate-error"),
+    ).toBeDefined();
   });
 
   it("answers unknown-session jingle IQs with item-not-found", async () => {

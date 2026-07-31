@@ -69,12 +69,50 @@ accident.
 - Unknown-session jingle IQs get `item-not-found` + `<unknown-session/>`;
   `session-info`/`transport-info` on known sessions are acked and ignored.
 
-### S5B candidate negotiation (XEP-0260) — protocol layer
+### S5B candidate negotiation (XEP-0260)
 
-`src/socks5/jingle-s5b.ts` implements the wire format and the negotiation
-arithmetic. It is **not yet wired into `JingleManager`** (see the roadmap), but
-the interpretations it commits to are recorded here because they are what an
-interoperating implementation has to agree with:
+`src/socks5/jingle-s5b.ts` holds the wire format and the negotiation arithmetic;
+`src/jingle/s5b-negotiation.ts` holds the per-session waiting; `JingleManager`
+drives both. It runs when the caller supplies a `Socks5Adapter` (Node only) and
+falls back to IBB otherwise. Deviations and interpretations, in the order they
+bite:
+
+- **The initiate carries no candidates.** XEP-0332 embeds the session-initiate
+  in `<data>`, and that element is built *synchronously* while gathering
+  candidates (and hashing `dstaddr`) is asynchronous. So the initiate offers a
+  bare `<transport sid mode='tcp'/>` and the candidates follow in a
+  `transport-info`, which §2.3 provides for. A peer that expects candidates in
+  the initiate will simply see none and report `<candidate-error/>`, which is
+  handled.
+- **`dstaddr` is informational here.** It is sent with the candidates when
+  known, and its absence is not fatal: both parties can derive
+  SHA-1(sid + initiator + responder) themselves, and the SOCKS5 adapter does
+  exactly that rather than trusting the wire value.
+- **The negotiation is deliberately asymmetric.** The initiator always reports
+  `<candidate-error/>` for the responder's candidates, and the responder offers
+  none of its own. Using a responder-offered candidate would mean *writing* over
+  a socket the initiator dialled, and the `Socks5Adapter` surface only exposes a
+  read side for `connect()`. Reporting an error is the conformant way to say
+  "none of yours are usable to me", so the negotiation still completes correctly
+  — it just always resolves to an initiator-offered candidate or to the IBB
+  fallback. Extending the adapter with a connect-and-write direction would make
+  it symmetric without touching the negotiation.
+- **A winning proxy candidate is activated by its offerer**, which is always the
+  initiator here: the adapter's `openOutgoing` sends the XEP-0065 `<activate/>`
+  IQ to the proxy, and the initiator then sends `<activated cid=…/>` so the
+  responder knows it may read. The responder waits for that before handing the
+  body stream to its caller, because a proxy relays nothing until activated.
+- **Fallback is `transport-replace` with an IBB transport**, and the two sides
+  hand over carefully: the responder arms its IBB receiver *before* answering
+  with `transport-accept`, and the initiator does not write a byte until that
+  accept arrives. Otherwise the first block would land on nothing.
+- A receiver with **no adapter at all** (a browser) accepts an s5b offer, reports
+  `<candidate-error/>` immediately, and receives the body over the replacement
+  IBB transport. Refusing the session outright would have been the easier path
+  and the worse one.
+
+The interpretations the protocol layer commits to, which an interoperating
+implementation has to agree with:
 
 - **Tie-breaking is the ambiguity that matters.** §2.4 says that when both
   parties send `<candidate-used/>` with equal priority, "the candidate offered by

@@ -14,9 +14,10 @@ suite against a real Prosody.
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
 
 Two directories are single-project by nature: `test/integration-node/`
-(raw TCP sockets for SOCKS5 bytestreams, the CLI's metrics/health listener over
-a real socket, and the static-site handler against real temp directories) runs
-only under `node`, and
+(raw TCP sockets for SOCKS5 bytestreams — XEP-0065 *and* the XEP-0260 jingle
+negotiation, both carrying a body over a real socket — the CLI's metrics/health
+listener over a real socket, and the static-site handler against real temp
+directories) runs only under `node`, and
 `test/browser/` (real CSSOM, `DOMParser`, blob URLs) only under `browser`.
 
 The `browser` project exists to *prove* the browser-safe-core rule: the full
@@ -91,8 +92,12 @@ Two properties make it trustworthy:
   test hold, drop, or reorder deliveries — the chunked suite delivers an
   entire chunk stream in **reverse order** this way.
 
-Suites: `roundtrip.test.ts` (inline flows, failure mapping, component-style
-addressing), `streaming.test.ts` (1 MiB chunked, reordering, IBB both
+Suites: `jingle-s5b.test.ts` (the XEP-0260 choreography with a fake in-process
+bytestream: a body over a negotiated candidate, and each of the three routes into
+the IBB fallback — no candidates offered, none reachable, and a receiver with no
+adapter at all; each asserts *which* transport carried the bytes rather than only
+that they arrived), `roundtrip.test.ts` (inline flows, failure mapping,
+component-style addressing), `streaming.test.ts` (1 MiB chunked, reordering, IBB both
 directions, `httpxFetch` bridge), `abort.test.ts` (AbortSignal / cancel /
 close propagation), `sipub.test.ts` / `jingle.test.ts` (handshakes, expiry,
 peer binding, decline paths, duplicate-initiate hedge), `caps.test.ts`
