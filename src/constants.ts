@@ -27,6 +27,8 @@ export const NS_JINGLE_ERRORS = "urn:xmpp:jingle:errors:1";
 export const NS_JINGLE_FT = "urn:xmpp:jingle:apps:file-transfer:5";
 /** XEP-0261: Jingle In-Band Bytestreams transport. */
 export const NS_JINGLE_IBB = "urn:xmpp:jingle:transports:ibb:1";
+/** XEP-0260: Jingle SOCKS5 Bytestreams Transport Method. */
+export const NS_JINGLE_S5B = "urn:xmpp:jingle:transports:s5b:1";
 /** XEP-0065: SOCKS5 Bytestreams. */
 export const NS_BYTESTREAMS = "http://jabber.org/protocol/bytestreams";
 

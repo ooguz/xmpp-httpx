@@ -8,6 +8,11 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **XEP-0260 protocol layer** (Jingle SOCKS5 Bytestreams): candidate/transport
+  codec, transport-info payloads, priority arithmetic, `dstaddr`, and the §2.4
+  negotiation reconciliation (`resolveS5bNegotiation`), all exported. The
+  session-level wiring into `JingleManager` is not done — see
+  [docs/ROADMAP.md](docs/ROADMAP.md).
 - **Desktop shell** (`examples/electron/`): `httpx://` registered as a real
   scheme via `protocol.handle`, so Chromium fetches pages *and subresources*
   itself. Not published to npm — an example, like the WebExtension.

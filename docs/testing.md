@@ -51,6 +51,12 @@ together.
   not drag down an explicit `text/html`).
 - `response-form.test.ts` — `HttpxResponse.formData()` over urlencoded *and*
   multipart bodies, plus the two ways it refuses clearly.
+- `jingle-s5b.test.ts` — the XEP-0260 layer: candidate/transport round trips
+  through real XML, every malformed-candidate refusal, the priority formula
+  (including that a proxy can never outrank a direct candidate), and the §2.4
+  reconciliation — most importantly run from *both* viewpoints of the same
+  negotiation to prove the two peers pick the same candidate rather than
+  deadlocking on a tie.
 - `rate-limit.test.ts` — the token bucket with a hand-moved clock: burst then
   429, `Retry-After` never earlier than a token exists, refill capped at the
   burst, per-bare-JID isolation (including that extra resources do *not*

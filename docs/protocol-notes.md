@@ -69,6 +69,36 @@ accident.
 - Unknown-session jingle IQs get `item-not-found` + `<unknown-session/>`;
   `session-info`/`transport-info` on known sessions are acked and ignored.
 
+### S5B candidate negotiation (XEP-0260) — protocol layer
+
+`src/socks5/jingle-s5b.ts` implements the wire format and the negotiation
+arithmetic. It is **not yet wired into `JingleManager`** (see the roadmap), but
+the interpretations it commits to are recorded here because they are what an
+interoperating implementation has to agree with:
+
+- **Tie-breaking is the ambiguity that matters.** §2.4 says that when both
+  parties send `<candidate-used/>` with equal priority, "the candidate offered by
+  the initiator is used". A party always reports a candidate from its *peer's*
+  list, so the initiator-offered candidate is the one the **responder** reported
+  — that is the reading implemented, and both viewpoints of the same negotiation
+  provably pick the same candidate (there is a test asserting exactly that). Read
+  the other way, the two sides would each pick the other's candidate and the
+  transfer would deadlock, which is why this is written down rather than left to
+  the reader.
+- **`mode='udp'` is refused**, not downgraded. The schema allows it; nothing in
+  XEP-0260 says how to use it, and silently treating it as `tcp` would be a
+  worse failure than a clear one.
+- **Duplicate candidate `cid`s are refused** at parse time: `<candidate-used/>`
+  names a cid, so duplicates would make the report ambiguous.
+- **A missing `type` defaults to `direct`**, matching the schema's default, and
+  an *unknown* type is refused rather than assigned a priority.
+- Priority is `2^16 × type-preference + local-preference` with the XEP's
+  recommended preferences (direct 126, assisted 120, tunnel 110, proxy 10), so a
+  proxy can never outrank a direct candidate no matter the local preference.
+- `dstaddr` is SHA-1(sid + initiator full JID + responder full JID) — the
+  XEP-0065 §5.3.1 construction with the Jingle roles supplying the JIDs, which is
+  why the existing `computeDomain()` is reused.
+
 ## Request bodies
 
 - The `sipub`/`ibb`/`jingle` attributes of `<req>` describe what the

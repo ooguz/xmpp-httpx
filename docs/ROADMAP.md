@@ -7,7 +7,7 @@ browser-mode CI, and the Firefox/Chromium WebExtension browser
 (`examples/webext/`) — which now renders page CSS, submits forms, caches with
 real 304 revalidation, saves downloads, and shows page titles and favicons.
 Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
-are done bar Jingle S5B; phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
+are done bar Jingle S5B (whose protocol layer landed separately); phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
 image, observability, static-site mode, rate limiting); phase 12 is done (the
 Electron shell, with OS-handler and mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
@@ -50,12 +50,35 @@ Goal: close the remaining spec-adjacent gaps.
   candidates, automatic IBB fallback on the same sid when every candidate
   is unreachable. Details in [architecture.md](architecture.md) §SOCKS5
   Bytestreams.
-- [ ] **Jingle S5B — XEP-0260** (L) — deliberately deferred out of the SOCKS5
-  bytestreams work above: needs real transport candidate negotiation
-  (`transport-info`/`candidate-used`/`candidate-error`/`transport-replace`)
-  that the current minimal `JingleManager` doesn't support at all (it skips
-  candidate exchange entirely and jumps straight to a single embedded
-  session-initiate over IBB). A separate, substantially larger round.
+- [~] **Jingle S5B — XEP-0260** (L) — **protocol layer done, session wiring not.**
+
+  Done and tested (`src/socks5/jingle-s5b.ts`, 24 unit tests): the
+  `<transport>`/`<candidate>` codec, `<candidate-used>`/`<candidate-error>`/
+  `<activated>`/`<proxy-error>` payloads, the §2.1 priority arithmetic, the §2.2
+  `dstaddr`, candidate ordering, and `resolve()` — the §2.4 reconciliation of the
+  two sides' reports, including the tie-break reading that keeps both peers
+  choosing the *same* candidate instead of deadlocking (asserted from both
+  viewpoints; interpretation recorded in
+  [protocol-notes.md](protocol-notes.md)). Exported, so it is usable on its own.
+
+  Remaining, and deliberately not rushed — this transport carries response
+  bodies, so a half-built state machine is worse than none:
+
+  1. `JingleManager.offer()` building an s5b transport (candidates from a
+     `Socks5Adapter`) instead of the IBB one, when an adapter is present.
+  2. `session-accept` carrying the responder's candidates, and a real
+     `transport-info` handler — today `transport-info` is acked and ignored, and
+     non-IBB transports are declined outright.
+  3. The connect race on both sides (the adapter's `connect()` already does the
+     client half; `candidatesFor()` already hosts a direct streamhost), then
+     exchanging reports and applying `resolve()`.
+  4. Proxy activation for a winning `type='proxy'` candidate: an XEP-0065
+     `<activate/>` IQ to the proxy, then `<activated cid=…/>`.
+  5. `transport-replace` → IBB when `resolve()` returns `fallback`, plus the
+     accept/reject of a replacement.
+  6. Tests: the full choreography over the mock pair with a fake adapter, and a
+     real-socket case in `test/integration-node/` alongside the existing
+     XEP-0065 one.
 - [x] **Stanza-size budgets** (S) — `stanzaBudgets(maxStanzaBytes)` helper
   (v0.6.0); explicit `maxChunkSize` advertisements now honored to the spec
   max. Automatic XEP-0478 probing stays with the application, which owns

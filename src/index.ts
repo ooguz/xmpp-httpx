@@ -78,6 +78,26 @@ export {
   type Socks5Adapter,
   type StreamhostCandidate,
 } from "./socks5/protocol.js";
+export {
+  buildActivated,
+  buildCandidateError,
+  buildCandidateUsed,
+  buildProxyError,
+  buildTransport,
+  candidatePriority,
+  parseInfo,
+  parseTransport,
+  resolve as resolveS5bNegotiation,
+  s5bDstAddr,
+  sortCandidates,
+  TYPE_PREFERENCE,
+  type CandidateType,
+  type S5bCandidate,
+  type S5bInfo,
+  type S5bOutcome,
+  type S5bReport,
+  type S5bTransport,
+} from "./socks5/jingle-s5b.js";
 
 // Client and server
 export * from "./client/index.js";
