@@ -88,15 +88,21 @@ bite:
   known, and its absence is not fatal: both parties can derive
   SHA-1(sid + initiator + responder) themselves, and the SOCKS5 adapter does
   exactly that rather than trusting the wire value.
-- **The negotiation is deliberately asymmetric.** The initiator always reports
-  `<candidate-error/>` for the responder's candidates, and the responder offers
-  none of its own. Using a responder-offered candidate would mean *writing* over
-  a socket the initiator dialled, and the `Socks5Adapter` surface only exposes a
-  read side for `connect()`. Reporting an error is the conformant way to say
-  "none of yours are usable to me", so the negotiation still completes correctly
-  — it just always resolves to an initiator-offered candidate or to the IBB
-  fallback. Extending the adapter with a connect-and-write direction would make
-  it symmetric without touching the negotiation.
+- **The negotiation is symmetric.** Both parties offer whatever streamhosts
+  their adapter can produce, both dial the other's, and `resolve()` arbitrates —
+  so a sender that cannot host (behind NAT) can still deliver a body by dialling
+  *out* to a candidate the receiver hosts. That direction needs both ends of a
+  SOCKS5 connection, which is why `Socks5Adapter` hands back a duplex from both
+  `connect()` and `openChosen()` rather than a single direction each.
+- **Whoever offered the winning candidate takes it up** (`openChosen`) and, for a
+  proxy, activates it and sends `<activated cid=…/>`; the dialling side waits for
+  that before using the stream. The XEP-0065 `<activate/>` names the party that
+  dialled the proxy, which flips with the role — so it is passed separately from
+  the two context JIDs, which must stay fixed because they are what `dstaddr` is
+  hashed from and both sides have to agree on it.
+- **The losing connection is closed.** Both peers may dial each other before the
+  winner is known; the duplex that lost is aborted and cancelled rather than left
+  open.
 - **A winning proxy candidate is activated by its offerer**, which is always the
   initiator here: the adapter's `openOutgoing` sends the XEP-0065 `<activate/>`
   IQ to the proxy, and the initiator then sends `<activated cid=…/>` so the

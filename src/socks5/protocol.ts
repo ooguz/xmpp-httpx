@@ -33,9 +33,20 @@ export interface Socks5OutStream {
   abort(reason: Error): Promise<void>;
 }
 
-export interface Socks5ConnectResult {
-  usedJid: string;
+/**
+ * Both ends of an established bytestream. A SOCKS5 connection is duplex, and
+ * which end a caller wants depends on its role — XEP-0065's publisher writes
+ * while its retriever reads, but in an XEP-0260 negotiation either party may end
+ * up on either side depending on whose candidate won. Handing back both keeps
+ * the adapter role-neutral; the unused end is simply never touched.
+ */
+export interface Socks5Duplex {
   readable: ReadableStream<Uint8Array>;
+  out: Socks5OutStream;
+}
+
+export interface Socks5ConnectResult extends Socks5Duplex {
+  usedJid: string;
 }
 
 /**
@@ -43,18 +54,30 @@ export interface Socks5ConnectResult {
  * sipub code (src/sipub/sipub.ts) never imports `node:net` directly.
  */
 export interface Socks5Adapter {
-  /** Publisher side: candidate streamhosts to offer for this sid (may be empty). */
+  /** Streamhosts we can offer for this sid (may be empty — we may host none). */
   candidatesFor(
     sid: string,
     ctx: Socks5NegotiationContext,
   ): Promise<StreamhostCandidate[]>;
-  /** Publisher side: establish the write end once the retriever names the used streamhost. */
-  openOutgoing(
+  /**
+   * A candidate *we offered* was chosen: take up the connection. For a
+   * streamhost we host, that means the inbound socket the peer already opened;
+   * for a proxy, it means dialling it and sending the XEP-0065 `<activate/>`.
+   *
+   * `activateJid` names the peer to activate the stream to, when that is not
+   * `ctx.targetJid` — it differs by role in XEP-0260, while the two context JIDs
+   * must stay fixed because they are what the `dstaddr` hash is built from and
+   * both parties have to compute the same one.
+   */
+  openChosen(
     sid: string,
     usedJid: string,
-    ctx: Socks5NegotiationContext & { candidates: readonly StreamhostCandidate[] },
-  ): Promise<Socks5OutStream>;
-  /** Retriever side: try candidates in order as a SOCKS5 client; throws if all fail. */
+    ctx: Socks5NegotiationContext & {
+      candidates: readonly StreamhostCandidate[];
+      activateJid?: string;
+    },
+  ): Promise<Socks5Duplex>;
+  /** Dial the peer's candidates in order; throws if all fail. */
   connect(
     sid: string,
     candidates: readonly StreamhostCandidate[],

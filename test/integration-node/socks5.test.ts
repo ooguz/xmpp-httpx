@@ -140,8 +140,8 @@ describe("SOCKS5 bytestreams adapter (XEP-0065)", () => {
       { jid: "proxy.example.org", host: proxy.host, port: proxy.port },
     ]);
 
-    const [out, result] = await Promise.all([
-      publisherAdapter.openOutgoing(sid, "proxy.example.org", { ...ctx, candidates }),
+    const [{ out }, result] = await Promise.all([
+      publisherAdapter.openChosen(sid, "proxy.example.org", { ...ctx, candidates }),
       retrieverAdapter.connect(sid, candidates, ctx),
     ]);
     expect(result.usedJid).toBe("proxy.example.org");
@@ -160,7 +160,7 @@ describe("SOCKS5 bytestreams adapter (XEP-0065)", () => {
     const adapter = createSocks5Adapter(stubSession("publisher@example.org/res"), {});
     cleanups.push(() => adapter.release());
     await expect(
-      adapter.openOutgoing(
+      adapter.openChosen(
         "sid",
         "nobody@example.org",
         {
@@ -198,7 +198,7 @@ function setup(
 describe("SOCKS5 bytestreams as a sipub stream-method", () => {
   it("streams a response body directly (publisher self-hosts a streamhost)", async () => {
     const body = patternBytes(150_000);
-    const openOutgoing = vi.fn();
+    const openChosen = vi.fn();
 
     const { client } = setup(
       () => ({
@@ -211,13 +211,13 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
           listen: { host: "127.0.0.1", port: 0 },
         });
         cleanups.push(() => realAdapter.release());
-        // Spy on openOutgoing so a regression that silently falls back to
+        // Spy on openChosen so a regression that silently falls back to
         // IBB (still delivering correct bytes!) fails this test loudly.
         const serverSocks5: Socks5Adapter = {
           ...realAdapter,
-          openOutgoing: (...args) => {
-            openOutgoing(...args);
-            return realAdapter.openOutgoing(...args);
+          openChosen: (...args) => {
+            openChosen(...args);
+            return realAdapter.openChosen(...args);
           },
         };
         return { preferredStreams: ["sipub"], socks5: serverSocks5 };
@@ -228,7 +228,7 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
     const resp = await client.request("server@example.org", { resource: "/s5b" });
     expect(resp.statusCode).toBe(200);
     expect(await bytesFromStream(resp.body!)).toEqual(body);
-    expect(openOutgoing).toHaveBeenCalledTimes(1);
+    expect(openChosen).toHaveBeenCalledTimes(1);
   });
 
   it("streams a jingle body over a negotiated s5b candidate (XEP-0260)", async () => {
@@ -236,7 +236,7 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
     // Jingle rather than SI: session-initiate → accept → candidates in a
     // transport-info → candidate-used → bytes over a real TCP socket.
     const body = patternBytes(140_000);
-    const openOutgoing = vi.fn();
+    const openChosen = vi.fn();
 
     const { client } = setup(
       () => ({
@@ -251,9 +251,9 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
         cleanups.push(() => realAdapter.release());
         const serverSocks5: Socks5Adapter = {
           ...realAdapter,
-          openOutgoing: (...args) => {
-            openOutgoing(...args);
-            return realAdapter.openOutgoing(...args);
+          openChosen: (...args) => {
+            openChosen(...args);
+            return realAdapter.openChosen(...args);
           },
         };
         return { preferredStreams: ["jingle"], socks5: serverSocks5 };
@@ -265,7 +265,7 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
     expect(resp.statusCode).toBe(200);
     expect(await bytesFromStream(resp.body!)).toEqual(body);
     // Proof it was the negotiated socket and not a quiet IBB fallback.
-    expect(openOutgoing).toHaveBeenCalledTimes(1);
+    expect(openChosen).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to IBB when a jingle s5b negotiation finds no reachable candidate", async () => {
@@ -288,6 +288,48 @@ describe("SOCKS5 bytestreams as a sipub stream-method", () => {
     const resp = await client.request("server@example.org", { resource: "/fallback" });
     expect(resp.statusCode).toBe(200);
     expect(await bytesFromStream(resp.body!)).toEqual(body);
+  });
+
+  it("streams a jingle body over a candidate the *receiver* hosts", async () => {
+    // The connect-and-write direction: the sender hosts nothing (a NAT'd
+    // gateway), the receiver does, so the body crosses a socket the sender
+    // dialled outward. Impossible before the adapter exposed both ends.
+    const body = patternBytes(120_000);
+    const connect = vi.fn();
+
+    const { client } = setup(
+      () => ({
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+        body: streamFromBytes(body),
+      }),
+      (serverSession) => {
+        // No listener: nothing to offer, so the receiver's candidate must win.
+        const adapter = createSocks5Adapter(serverSession, {});
+        cleanups.push(() => adapter.release());
+        const spied: Socks5Adapter = {
+          ...adapter,
+          connect: (...args) => {
+            connect(...args);
+            return adapter.connect(...args);
+          },
+        };
+        return { preferredStreams: ["jingle"], socks5: spied };
+      },
+      (clientSession) => {
+        const adapter = createSocks5Adapter(clientSession, {
+          listen: { host: "127.0.0.1", port: 0 },
+        });
+        cleanups.push(() => adapter.release());
+        return { socks5: adapter };
+      },
+    );
+
+    const resp = await client.request("server@example.org", { resource: "/reverse" });
+    expect(resp.statusCode).toBe(200);
+    expect(await bytesFromStream(resp.body!)).toEqual(body);
+    // The sender dialled: proof the bytes went the new way, not over IBB.
+    expect(connect).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to IBB when every SOCKS5 candidate is unreachable", async () => {

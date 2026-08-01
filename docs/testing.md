@@ -14,8 +14,9 @@ suite against a real Prosody.
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
 
 Two directories are single-project by nature: `test/integration-node/`
-(raw TCP sockets for SOCKS5 bytestreams — XEP-0065 *and* the XEP-0260 jingle
-negotiation, both carrying a body over a real socket — the CLI's metrics/health
+(raw TCP sockets for SOCKS5 bytestreams — XEP-0065 and the XEP-0260 jingle
+negotiation in *both* directions, sender-hosted and receiver-hosted, each
+carrying a body over a real socket — the CLI's metrics/health
 listener over a real socket, and the static-site handler against real temp
 directories) runs only under `node`, and
 `test/browser/` (real CSSOM, `DOMParser`, blob URLs) only under `browser`.

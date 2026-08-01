@@ -59,15 +59,15 @@ Goal: close the remaining spec-adjacent gaps.
   produce a usable candidate. Active whenever a `Socks5Adapter` is supplied;
   plain IBB otherwise, so browsers are unaffected.
 
-  Two things worth knowing, both in [protocol-notes.md](protocol-notes.md): the
-  candidates cannot ride in the session-initiate (XEP-0332 embeds that element
-  in `<data>`, built synchronously, while gathering candidates is async), and the
-  negotiation is deliberately asymmetric — the initiator reports
-  `candidate-error` for the responder's candidates because writing over a socket
-  it dialled itself is outside the adapter's surface. It therefore always
-  resolves to an initiator-offered candidate or to IBB, which is conformant but
-  narrower than a symmetric implementation; adding a connect-and-write direction
-  to the adapter would widen it without touching the negotiation.
+  The negotiation is **symmetric**: both sides offer what they can host, both
+  dial, and either direction can win — so a sender behind NAT still delivers by
+  dialling out to a receiver-hosted candidate. `Socks5Adapter` therefore returns
+  a duplex from both `connect()` and `openChosen()` (renamed from
+  `openOutgoing`, which described only one role). The one thing that cannot be
+  symmetric: candidates do not ride in the session-initiate, because XEP-0332
+  embeds that element in `<data>` and builds it synchronously while gathering
+  candidates is async — they follow in a `transport-info`, per §2.3. Details in
+  [protocol-notes.md](protocol-notes.md).
 
   Tested at three levels: 24 unit tests on the pure layer (including that both
   peers resolve a tie to the *same* candidate), 6 choreography tests over the

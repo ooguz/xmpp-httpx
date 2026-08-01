@@ -32,7 +32,12 @@ import {
   sortCandidates,
   type S5bCandidate,
 } from "../socks5/jingle-s5b.js";
-import type { Socks5Adapter, StreamhostCandidate } from "../socks5/protocol.js";
+import type {
+  Socks5Adapter,
+  Socks5ConnectResult,
+  Socks5Duplex,
+  StreamhostCandidate,
+} from "../socks5/protocol.js";
 import type { BodyOffer, BodyTransport } from "../transport/registry.js";
 import { S5bNegotiation } from "./s5b-negotiation.js";
 import type { StreamAcceptFlags } from "../transport/select.js";
@@ -71,6 +76,16 @@ interface SessionState {
   transport: "ibb" | "s5b";
   /** Present while an s5b negotiation is in flight (or has completed). */
   s5b?: S5bNegotiation;
+}
+
+/**
+ * Both peers may dial each other before the winner is known, so the losing
+ * connection has to be let go — quietly, since its failure is of no interest.
+ */
+async function discard(duplex: Socks5Duplex | undefined): Promise<void> {
+  if (!duplex) return;
+  await duplex.out.abort(new Error("candidate not chosen")).catch(() => {});
+  await duplex.readable.cancel().catch(() => {});
 }
 
 /** Maps our candidate list to what the SOCKS5 adapter speaks. */
@@ -396,6 +411,8 @@ export class JingleManager {
       requesterJid: negotiation.initiatorJid,
       targetJid: negotiation.responderJid,
     };
+    /** A connection we opened that may yet lose the negotiation. */
+    let dialled: Socks5ConnectResult | undefined;
 
     try {
       negotiation.dstaddr = await s5bDstAddr(
@@ -427,36 +444,70 @@ export class JingleManager {
         );
       }
 
-      negotiation.setLocalReport({ kind: "error" });
-      await this.#sendTransportInfo(
-        to,
-        body.from,
-        sessionId,
-        buildCandidateError(negotiation.sid),
-      );
+      // Try the responder's candidates as a client. Both sides dial, which is
+      // the point of XEP-0260: whichever direction is reachable wins.
+      dialled = await this.#dialPeerCandidates(negotiation, socks5, ctx);
+      const usedRemote = dialled
+        ? negotiation.remoteCandidates.find(
+            (candidate) => candidate.jid === dialled!.usedJid,
+          )
+        : undefined;
+
+      if (dialled && usedRemote) {
+        negotiation.setLocalReport({ kind: "used", candidate: usedRemote });
+        await this.#sendTransportInfo(
+          to,
+          body.from,
+          sessionId,
+          buildCandidateUsed(negotiation.sid, usedRemote.cid),
+        );
+      } else {
+        negotiation.setLocalReport({ kind: "error" });
+        await this.#sendTransportInfo(
+          to,
+          body.from,
+          sessionId,
+          buildCandidateError(negotiation.sid),
+        );
+      }
 
       const outcome = await negotiation.outcome(this.idleTimeoutMs);
-      // "remote" would mean writing over our own outbound socket, which the
-      // adapter cannot do — treat it like any other unusable result.
-      if (outcome.kind === "fallback" || outcome.offeredBy === "remote") {
+      if (outcome.kind === "fallback") {
+        await discard(dialled);
+        dialled = undefined;
         await this.#replaceWithIbb(to, sessionId, key, state);
         return;
       }
 
       const chosen = outcome.candidate;
-      const out = await socks5.openOutgoing(negotiation.sid, chosen.jid, {
-        ...ctx,
-        candidates: streamhosts,
-      });
-      if (chosen.type === "proxy") {
-        // openOutgoing already sent the XEP-0065 <activate/> to the proxy; this
-        // tells the peer it may start reading.
-        await this.#sendTransportInfo(
-          to,
-          body.from,
-          sessionId,
-          buildActivated(negotiation.sid, chosen.cid),
-        );
+      let out;
+      if (outcome.offeredBy === "local") {
+        // Our streamhost won: take up the connection the peer opened to it (or
+        // dial our proxy), and let go of whatever we dialled ourselves.
+        await discard(dialled);
+        dialled = undefined;
+        ({ out } = await socks5.openChosen(negotiation.sid, chosen.jid, {
+          ...ctx,
+          candidates: streamhosts,
+        }));
+        if (chosen.type === "proxy") {
+          // openChosen already sent the XEP-0065 <activate/> to the proxy; this
+          // tells the peer it may start reading.
+          await this.#sendTransportInfo(
+            to,
+            body.from,
+            sessionId,
+            buildActivated(negotiation.sid, chosen.cid),
+          );
+        }
+      } else {
+        // The responder's streamhost won: we write over the socket we dialled.
+        out = dialled!.out;
+        dialled = undefined; // ownership passes to the transfer below
+        if (chosen.type === "proxy") {
+          // Their proxy relays nothing until they activate it.
+          await negotiation.waitActivation(this.idleTimeoutMs);
+        }
       }
 
       try {
@@ -473,12 +524,34 @@ export class JingleManager {
       await this.#terminate(to, body.from, sessionId, "success");
       this.#sessions.delete(key);
     } catch (err) {
+      await discard(dialled);
       negotiation.fail(err);
       await this.#terminate(to, body.from, sessionId, "failed-transport").catch(
         () => {},
       );
       this.#sessions.delete(key);
       throw fromXmppError(err);
+    }
+  }
+
+  /** Dials the peer's candidates, best first. Undefined when none can be used. */
+  async #dialPeerCandidates(
+    negotiation: S5bNegotiation,
+    socks5: Socks5Adapter,
+    ctx: { requesterJid: string; targetJid: string },
+  ): Promise<Socks5ConnectResult | undefined> {
+    const candidates = sortCandidates([
+      ...(await negotiation.waitRemoteCandidates(this.idleTimeoutMs)),
+    ]);
+    if (candidates.length === 0) return undefined;
+    try {
+      return await socks5.connect(
+        negotiation.sid,
+        toStreamhosts(candidates),
+        ctx,
+      );
+    } catch {
+      return undefined; // every candidate refused: a report, not a crash
     }
   }
 
@@ -720,7 +793,22 @@ export class JingleManager {
       negotiation.receiveRemoteCandidates(offered.candidates);
     }
 
-    // Accept first, echoing the transport with no candidates of our own.
+    // Gather our own candidates before accepting, so they travel in the accept
+    // rather than needing a further round trip. An adapter with no listener and
+    // no proxy simply yields none, which is the common client case.
+    const ctx = { requesterJid: initiatorJid, targetJid: ourJid };
+    let ourStreamhosts: StreamhostCandidate[] = [];
+    if (this.#socks5) {
+      try {
+        ourStreamhosts = [...(await this.#socks5.candidatesFor(offered.sid, ctx))];
+      } catch {
+        ourStreamhosts = [];
+      }
+    }
+    const ourCandidates = toS5bCandidates(ourStreamhosts, ourJid);
+    negotiation.offerLocal(ourCandidates);
+
+    // Accept, echoing the transport with whatever we can host.
     const description = content.getChild("description");
     const acceptEl = xml(
       "jingle",
@@ -738,7 +826,11 @@ export class JingleManager {
           senders: content.attrs["senders"] ?? "initiator",
         },
         ...(description ? [cloneElement(description)] : []),
-        buildTransport({ sid: offered.sid, mode: "tcp", candidates: [] }),
+        buildTransport({
+          sid: offered.sid,
+          mode: "tcp",
+          candidates: ourCandidates,
+        }),
       ),
     );
     const attrs: Record<string, string> =
@@ -752,33 +844,18 @@ export class JingleManager {
       throw fromXmppError(err);
     }
 
+    let dialled: Socks5ConnectResult | undefined;
     try {
       const socks5 = this.#socks5;
-      let readable: ReadableStream<Uint8Array> | undefined;
 
       if (socks5) {
-        const candidates = sortCandidates([
-          ...(await negotiation.waitRemoteCandidates(timeoutMs)),
-        ]);
-        const ctx = { requesterJid: initiatorJid, targetJid: ourJid };
-        let connected: { usedJid: string; readable: ReadableStream<Uint8Array> } | undefined;
-        try {
-          if (candidates.length > 0) {
-            connected = await socks5.connect(
-              offered.sid,
-              toStreamhosts(candidates),
-              ctx,
-            );
-          }
-        } catch {
-          connected = undefined; // every candidate failed; report it as such
-        }
-
-        const used = connected
-          ? candidates.find((candidate) => candidate.jid === connected!.usedJid)
+        dialled = await this.#dialPeerCandidates(negotiation, socks5, ctx);
+        const used = dialled
+          ? negotiation.remoteCandidates.find(
+              (candidate) => candidate.jid === dialled!.usedJid,
+            )
           : undefined;
-        if (connected && used) {
-          readable = connected.readable;
+        if (dialled && used) {
           negotiation.setLocalReport({ kind: "used", candidate: used });
           await this.#sendResponderInfo(
             from,
@@ -810,20 +887,44 @@ export class JingleManager {
 
       const outcome = await negotiation.outcome(timeoutMs);
       if (outcome.kind === "fallback") {
+        await discard(dialled);
+        dialled = undefined;
         return await this.#receiveAfterReplace(from, sessionId, key, state, options);
       }
 
-      if (readable === undefined) {
-        // The winner is a candidate we never connected to, which we cannot read
-        // from; fall back rather than hand back a dead stream.
-        return await this.#receiveAfterReplace(from, sessionId, key, state, options);
+      if (outcome.offeredBy === "remote") {
+        // An initiator-offered candidate won, so we read over the socket we
+        // dialled; a proxy of theirs relays nothing until they activate it.
+        const readable = dialled!.readable;
+        dialled = undefined;
+        if (outcome.candidate.type === "proxy") {
+          await negotiation.waitActivation(timeoutMs);
+        }
+        return readable;
       }
+
+      // Our own streamhost won: take up the connection the initiator opened to
+      // it (or dial our proxy) and read from that instead.
+      await discard(dialled);
+      dialled = undefined;
+      const mine = await this.#socks5!.openChosen(offered.sid, outcome.candidate.jid, {
+        ...ctx,
+        candidates: ourStreamhosts,
+        // The party that dialled our proxy is the initiator, not ctx.targetJid
+        // (which is us) — the hash inputs must stay put, so this is separate.
+        activateJid: initiatorJid,
+      });
       if (outcome.candidate.type === "proxy") {
-        // A proxy relays nothing until the initiator activates it.
-        await negotiation.waitActivation(timeoutMs);
+        await this.#sendResponderInfo(
+          from,
+          options.ourJid,
+          sessionId,
+          buildActivated(offered.sid, outcome.candidate.cid),
+        );
       }
-      return readable;
+      return mine.readable;
     } catch (err) {
+      await discard(dialled);
       negotiation.fail(err);
       this.#sessions.delete(key);
       throw fromXmppError(err);

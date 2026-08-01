@@ -8,11 +8,24 @@
   without one), stanza budgets, stream preference, request logging and clean
   signal shutdown. Secrets come from `XMPP_HTTPX_SECRET`/`XMPP_HTTPX_PASSWORD`.
   See [docs/gateway-cli.md](docs/gateway-cli.md).
+- **Two latent SOCKS5 data-loss bugs fixed**, both found by exercising the read
+  direction of a dialled connection: the handshake reader buffered bytes that
+  shared a TCP segment with the CONNECT reply and then dropped them, and
+  detaching that reader left the socket in flowing mode, where Node *discards*
+  incoming data until the next listener attaches. Either could silently truncate
+  a body on the existing XEP-0065 retriever path; the second showed up as a test
+  failing one run in three.
+- **`Socks5Adapter` is now role-neutral**: `connect()` and `openChosen()` (renamed
+  from `openOutgoing`) both return `{ readable, out }`, so either party can read
+  or write over a bytestream whichever way it was established. Breaking change
+  for anyone implementing the adapter interface.
 - **XEP-0260 (Jingle SOCKS5 Bytestreams)**, end to end: candidate/transport
   codec, transport-info payloads, priority arithmetic, `dstaddr`, the §2.4
   negotiation reconciliation (all exported), and the `JingleManager` wiring —
-  candidates in a `transport-info`, `candidate-used`/`candidate-error`, proxy
-  activation, and `transport-replace` to IBB when no candidate is usable. Active
+  candidates in a `transport-info` from *both* sides, `candidate-used`/
+  `candidate-error`, proxy activation, and `transport-replace` to IBB when no
+  candidate is usable. A sender that cannot host reaches a receiver that can, by
+  dialling out. Active
   when a `Socks5Adapter` is supplied; IBB otherwise, so browser clients are
   unaffected. **Behaviour change:** a jingle offer carrying an s5b transport is
   now accepted (and falls back to IBB if necessary) rather than declined with

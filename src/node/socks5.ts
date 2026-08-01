@@ -15,6 +15,7 @@ import {
   SOCKS5_ATYP_DOMAIN,
   SOCKS5_METHOD_NO_AUTH,
   type Socks5Adapter,
+  type Socks5Duplex,
   type Socks5ConnectResult,
   type Socks5NegotiationContext,
   type Socks5OutStream,
@@ -44,9 +45,15 @@ export interface Socks5AdapterOptions {
   connectTimeoutMs?: number;
 }
 
+/** An accepted inbound socket, plus whatever the handshake over-read with it. */
+interface AcceptedSocket {
+  socket: net.Socket;
+  leftover: Uint8Array;
+}
+
 interface PendingDirect {
-  promise: Promise<net.Socket>;
-  resolve: (socket: net.Socket) => void;
+  promise: Promise<AcceptedSocket>;
+  resolve: (accepted: AcceptedSocket) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   claimed: boolean;
@@ -73,14 +80,17 @@ function createSocketReader(socket: net.Socket) {
     for (const w of waiters.splice(0)) w.reject(err);
   };
 
-  socket.on("data", (chunk: Buffer) => {
+  const onData = (chunk: Buffer): void => {
     buffer = Buffer.concat([buffer, chunk]);
     flush();
-  });
-  socket.on("error", (err) => fail(fromXmppError(err)));
-  socket.on("close", () =>
-    fail(new HttpxError("stream-error", "socks5 socket closed unexpectedly")),
-  );
+  };
+  const onError = (err: Error): void => fail(fromXmppError(err));
+  const onClose = (): void =>
+    fail(new HttpxError("stream-error", "socks5 socket closed unexpectedly"));
+
+  socket.on("data", onData);
+  socket.on("error", onError);
+  socket.on("close", onClose);
 
   return {
     readExact(n: number): Promise<Uint8Array> {
@@ -89,13 +99,33 @@ function createSocketReader(socket: net.Socket) {
         flush();
       });
     },
+    /**
+     * Detaches and returns whatever arrived after the bytes the caller asked
+     * for. A handshake and the first payload bytes can share a TCP segment, so
+     * these have to be handed to the body stream rather than dropped with the
+     * reader — losing them silently truncates a body.
+     */
+    release(): Uint8Array {
+      // Pause before detaching. Attaching a "data" listener put the socket into
+      // flowing mode, and in flowing mode with no listener Node *discards*
+      // incoming bytes — so without this, anything the peer sends between the
+      // handshake and the body stream attaching is silently lost. That failure
+      // is timing-dependent, which is exactly how it showed up: one run in three.
+      socket.pause();
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+      const leftover = new Uint8Array(buffer);
+      buffer = Buffer.alloc(0);
+      return leftover;
+    },
   };
 }
 
 async function socks5ClientHandshake(
   socket: net.Socket,
   domain: string,
-): Promise<void> {
+): Promise<Uint8Array> {
   const reader = createSocketReader(socket);
   socket.write(Buffer.from(buildGreeting()));
   const { method } = parseMethodSelection(await reader.readExact(2));
@@ -115,21 +145,29 @@ async function socks5ClientHandshake(
   if (!success) {
     throw new HttpxError("stream-error", "socks5 streamhost rejected CONNECT");
   }
+  return reader.release();
 }
 
-async function socks5ServerHandshake(socket: net.Socket): Promise<string> {
+async function socks5ServerHandshake(
+  socket: net.Socket,
+): Promise<{ domain: string; leftover: Uint8Array }> {
   const reader = createSocketReader(socket);
   const greeting = await reader.readExact(2);
   await reader.readExact(greeting[1]!); // offered methods, ignored — no-auth only
   socket.write(Buffer.from(buildMethodSelection()));
   const head = await reader.readExact(5);
   const rest = await reader.readExact(head[4]! + 2);
-  return parseConnectRequest(concatBytes([head, rest])).domain;
+  const { domain } = parseConnectRequest(concatBytes([head, rest]));
+  return { domain, leftover: reader.release() };
 }
 
-function readableFromSocket(socket: net.Socket): ReadableStream<Uint8Array> {
+function readableFromSocket(
+  socket: net.Socket,
+  prefix?: Uint8Array,
+): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {
+      if (prefix && prefix.length > 0) controller.enqueue(prefix);
       socket.on("data", (chunk: Buffer) => {
         controller.enqueue(new Uint8Array(chunk));
         if ((controller.desiredSize ?? 0) <= 0) socket.pause();
@@ -233,7 +271,7 @@ export function createSocks5Adapter(
     return new Promise((resolve, reject) => {
       const s = net.createServer((socket) => {
         socks5ServerHandshake(socket)
-          .then((domain) => {
+          .then(({ domain, leftover }) => {
             const pending = pendingDirect.get(domain);
             if (!pending || pending.claimed) {
               socket.write(Buffer.from(buildConnectReply(domain, false)));
@@ -243,7 +281,7 @@ export function createSocks5Adapter(
             pending.claimed = true;
             clearTimeout(pending.timer);
             socket.write(Buffer.from(buildConnectReply(domain, true)));
-            pending.resolve(socket);
+            pending.resolve({ socket, leftover });
           })
           .catch(() => socket.destroy());
       });
@@ -307,9 +345,9 @@ export function createSocks5Adapter(
           const domain = await computeDomain(sid, ctx.requesterJid, ctx.targetJid);
           const ourJid = session.jid?.toString();
           if (ourJid) {
-            let resolve!: (socket: net.Socket) => void;
+            let resolve!: (accepted: AcceptedSocket) => void;
             let reject!: (err: Error) => void;
-            const promise = new Promise<net.Socket>((res, rej) => {
+            const promise = new Promise<AcceptedSocket>((res, rej) => {
               resolve = res;
               reject = rej;
             });
@@ -326,7 +364,7 @@ export function createSocks5Adapter(
               }
             }, connectTimeoutMs);
             (timer as { unref?: () => void }).unref?.();
-            promise.catch(() => {}); // consumed by openOutgoing; silence unhandled-rejection noise if abandoned
+            promise.catch(() => {}); // consumed by openChosen; silence unhandled-rejection noise if abandoned
             pendingDirect.set(domain, { promise, resolve, reject, timer, claimed: false });
             candidates.push({
               jid: ourJid,
@@ -351,13 +389,14 @@ export function createSocks5Adapter(
       return candidates;
     },
 
-    async openOutgoing(
+    async openChosen(
       sid: string,
       usedJid: string,
       ctx: Socks5NegotiationContext & {
         candidates: readonly StreamhostCandidate[];
+        activateJid?: string;
       },
-    ): Promise<Socks5OutStream> {
+    ): Promise<Socks5Duplex> {
       const candidate = ctx.candidates.find((c) => c.jid === usedJid);
       if (!candidate) {
         throw new HttpxError(
@@ -376,16 +415,20 @@ export function createSocks5Adapter(
           );
         }
         try {
-          const socket = await pending.promise;
-          return outStreamFromSocket(socket);
+          const { socket, leftover } = await pending.promise;
+          return {
+            readable: readableFromSocket(socket, leftover),
+            out: outStreamFromSocket(socket),
+          };
         } finally {
           pendingDirect.delete(domain);
         }
       }
 
       const socket = await connectTcp(candidate.host, candidate.port, connectTimeoutMs);
+      let leftover: Uint8Array;
       try {
-        await socks5ClientHandshake(socket, domain);
+        leftover = await socks5ClientHandshake(socket, domain);
       } catch (err) {
         socket.destroy();
         throw err;
@@ -397,12 +440,17 @@ export function createSocks5Adapter(
           xml(
             "query",
             { xmlns: NS_BYTESTREAMS, sid },
-            xml("activate", null, ctx.targetJid),
+            // Whoever dialled the proxy is the party to activate the stream to;
+            // in XEP-0260 that is not always ctx.targetJid.
+            xml("activate", null, ctx.activateJid ?? ctx.targetJid),
           ),
         ),
         connectTimeoutMs,
       );
-      return outStreamFromSocket(socket);
+      return {
+        readable: readableFromSocket(socket, leftover),
+        out: outStreamFromSocket(socket),
+      };
     },
 
     async connect(
@@ -417,14 +465,19 @@ export function createSocks5Adapter(
       );
       for (const candidate of candidates) {
         let socket: net.Socket;
+        let dialLeftover: Uint8Array;
         try {
           socket = await connectTcp(candidate.host, candidate.port, connectTimeoutMs);
-          await socks5ClientHandshake(socket, domain);
+          dialLeftover = await socks5ClientHandshake(socket, domain);
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
           continue;
         }
-        return { usedJid: candidate.jid, readable: readableFromSocket(socket) };
+        return {
+          usedJid: candidate.jid,
+          readable: readableFromSocket(socket, dialLeftover),
+          out: outStreamFromSocket(socket),
+        };
       }
       throw lastError;
     },

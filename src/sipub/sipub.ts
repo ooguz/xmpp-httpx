@@ -360,7 +360,7 @@ export class SipubManager {
       );
     }
 
-    const out = await socks5.openOutgoing(sid, usedJid, {
+    const { out } = await socks5.openChosen(sid, usedJid, {
       requesterJid,
       targetJid: to,
       candidates,
