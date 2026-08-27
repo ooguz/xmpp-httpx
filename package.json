@@ -1,6 +1,6 @@
 {
   "name": "xmpp-httpx",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "XEP-0332: HTTP over XMPP Transport — client and server for Node.js and browsers",
   "license": "AGPL-3.0-only",
   "type": "module",

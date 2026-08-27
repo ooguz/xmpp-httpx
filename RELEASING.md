@@ -10,7 +10,7 @@ Two actions create public surfaces and therefore need the owner's hands
 gh repo create xmpp-httpx --public \
   --description "XEP-0332 HTTP over XMPP Transport for TypeScript — all seven body transports, client + server, Node and browsers, with a WebExtension httpx:// browser" \
   --source . --push
-git push origin v0.5.0
+git push origin v0.7.0
 
 # Enable GitHub Pages driven by the CI workflow (for the typedoc site):
 gh api repos/ooguz/xmpp-httpx/pages -X POST -f build_type=workflow

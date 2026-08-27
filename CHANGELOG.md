@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-08-27
 
 - **Gateway CLI**: `xmpp-httpx-gateway`, shipped as a `bin` of this package.
   Fronts an HTTP origin over XMPP in component or client mode, with a JSON

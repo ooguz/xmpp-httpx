@@ -1,6 +1,6 @@
 # Roadmap — next possible phases and tasks
 
-Status today (v0.6.0 + phase 10 work, 2026-07-30): the library implements
+Status today (v0.7.0, 2026-08-27): the library implements
 **all seven XEP-0332 body transports** with client + server, discovery +
 entity caps, SOCKS5 bytestreams, Content-Encoding, a Prosody E2E suite,
 browser-mode CI, and the Firefox/Chromium WebExtension browser
@@ -17,8 +17,8 @@ Electron shell, with OS-handler and mobile notes). Effort sizing: **S** ≤ half
 Goal: make the library consumable and visible; XEP-0332 explicitly asks for
 implementations to revive its standards process — be that implementation.
 
-- [ ] **Publish `xmpp-httpx@0.5.0` to npm** (S) — fully prepared (metadata,
-  `prepublishOnly` gate, pack verified, v0.5.0 tagged); owner action:
+- [ ] **Publish `xmpp-httpx@0.7.0` to npm** (S) — fully prepared (metadata,
+  `prepublishOnly` gate, pack verified, v0.7.0 tagged); owner action:
   `npm login && npm publish` — see [RELEASING.md](../RELEASING.md).
 - [ ] **Git remote + CI activation** (S) — prepared (badges, Pages CI job,
   repo URLs assume `ooguz/xmpp-httpx`); owner action: `gh repo create` +
