@@ -9,6 +9,7 @@ import {
 import { Connection } from "./connection.js";
 import { buildDrawerList, type DrawerEntry } from "./drawer.js";
 import { filenameFor, isAttachment, isRenderableType, saveBlob } from "./download.js";
+import { applyEmbedded } from "./embedded.js";
 import type { FormRefusal, FormSubmission } from "./forms.js";
 import {
   clearHistory,
@@ -45,6 +46,8 @@ const drawerList = $<HTMLUListElement>("drawerList");
 const drawerEmpty = $<HTMLParagraphElement>("drawerEmpty");
 const favicon = $<HTMLLinkElement>("favicon");
 const DEFAULT_FAVICON = favicon.getAttribute("href") ?? "";
+
+applyEmbedded(document, window.location.search);
 
 const connection = new Connection();
 connection.onStateChange = (state) => {
@@ -134,7 +137,10 @@ function syncChrome(): void {
   // longer the source of truth (each tab owns its own back/forward stack).
   const hash = tab.url === "" ? "" : `#${tab.url}`;
   if (window.location.hash !== hash) {
-    history.replaceState(null, "", hash === "" ? window.location.pathname : hash);
+    // A relative "#…" URL keeps the query string; the empty-tab branch must
+    // carry it explicitly or the ?embedded flag would vanish from the URL.
+    const bare = window.location.pathname + window.location.search;
+    history.replaceState(null, "", hash === "" ? bare : hash);
   }
   void refreshBookmarkButton(tab.url);
 }

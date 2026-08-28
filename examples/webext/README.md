@@ -45,6 +45,12 @@ get instead:
 | Omnibox keyword: `httpx server@example.org/page` ⏎ | ✔ | ✔ |
 | Clickable `ext+httpx://…` links (`protocol_handlers`) | ✔ | ✖ (key unsupported) |
 
+A host app that gives the page a *real* address bar (the Firefox Klar fork
+runs it as a GeckoView built-in extension behind the app's toolbar) can load
+`browser.html?embedded=1`: the extension's own tab strip and URL bar are
+hidden and the host chrome is the only chrome. Navigation still flows through
+the `#fragment`, which the page keeps updated for the host to mirror.
+
 ## Build
 
 ```sh

@@ -11,6 +11,11 @@ body {
   flex-direction: column;
   height: 100vh;
 }
+/* Embedded mode (?embedded=1): the host app owns the chrome — see embedded.ts. */
+body[data-embedded="true"] #tabstrip,
+body[data-embedded="true"] #chrome {
+  display: none;
+}
 #tabstrip {
   display: flex;
   align-items: stretch;
@@ -156,6 +161,11 @@ main {
   flex-direction: column;
   border-left: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   overflow: hidden;
+}
+/* The id selector above outweighs the UA's [hidden] rule, which would
+   otherwise silently lose — the drawer must actually close. */
+#drawer[hidden] {
+  display: none;
 }
 #drawer header {
   display: flex;

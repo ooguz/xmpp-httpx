@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **WebExtension embedded mode**: `browser.html?embedded=1` hides the
+  extension's own tab strip and URL bar, for a host app that provides its own
+  browser chrome — built for the Firefox Klar fork, where the page runs as a
+  GeckoView built-in extension behind the app's real toolbar. The flag is read
+  once at boot (the page rewrites its visible URL while navigating), and the
+  empty-tab `replaceState` now preserves the query string.
+- **WebExtension fix**: the history/bookmarks drawer was always visible — its
+  `#drawer { display: flex }` rule outweighed the UA's `[hidden]` rule, so
+  closing it never actually hid it. An explicit `#drawer[hidden]` rule restores
+  the intended behavior.
+
 ## 0.7.0 — 2026-08-27
 
 - **Gateway CLI**: `xmpp-httpx-gateway`, shipped as a `bin` of this package.
