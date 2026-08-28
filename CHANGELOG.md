@@ -8,6 +8,49 @@
   GeckoView built-in extension behind the app's real toolbar. The flag is read
   once at boot (the page rewrites its visible URL while navigating), and the
   empty-tab `replaceState` now preserves the query string.
+- **Embedded mode drives the host's back button**: standalone, the page's own
+  per-tab stacks are the history and every URL-mirror write replaces; embedded,
+  those controls are hidden, so a page-to-page navigation now *pushes* a
+  session-history entry and a host back/forward traversal (arriving as
+  `hashchange`) reloads the page it lands on. The boot-time upgrade of the
+  empty-tab entry still replaces, so the first page stays the only entry and
+  the host's back on it leaves the app rather than landing on a blank tab.
+  Hardening that came out of adversarially reviewing this change (two rounds):
+  - Tab URLs are canonicalized to the WHATWG-*serialized* spelling when
+    visited, and the URL mirror compares that spelling — `location.hash` reads
+    back percent-encoded, so a raw space or non-ASCII character in the tab URL
+    used to look like a permanently pending write (embedded, that pushed
+    duplicate entries on every load) and made a traversal re-enter the page
+    under a different identity: duplicate stack entries, guaranteed cache
+    misses, and a different wire resource than the original visit.
+  - Only a real URL change pushes. A re-spelling of the current page's hash —
+    hand-edited or typed `#httpx://host` landing on the canonical
+    `#httpx://host/` — replaces: pushing there left a duplicate entry behind
+    every typo, and let one non-canonical entry re-push the canonical one on
+    every host back press, an inescapable back-button trap.
+  - A load superseded by a newer one on the same tab now bails out instead of
+    rendering: a slow fetch that lost the race could paint its page *after*
+    the winner, leaving the iframe showing one page and the URL another. The
+    cache chip takes the superseded fetch's state no more, and a tab close
+    mid-load waits for *all* in-flight loads before detaching.
+  - Traversals never re-save attachments. History re-entry — the host's
+    back/forward, the page's own buttons — renders the file's receipt with a
+    "Download" button instead of saving with no user gesture; a *fresh*
+    navigation to an attachment (a URL typed into the host's toolbar arrives
+    as hashchange too, distinguished by whether the spelling is one the page
+    itself mirrored) still saves immediately.
+  - An unparseable typed URL takes a history entry of its own (like a
+    browser's error page), so walking back over it stays consistent instead
+    of leaving two identical adjacent entries and a dead back press.
+  - A URL typed while the boot auto-connect was still in flight is no longer
+    overridden by the boot hash once the connection comes up.
+- **WebExtension fix**: `normalizeUrl` no longer percent-decodes every
+  navigated URL — only inputs that arrive wholly encoded are decoded: the
+  Firefox protocol-handler `%s` placeholder (`ext+httpx://…`) and the
+  background script's omnibox deep link (`#httpx%3A%2F%2F…`). Decoding
+  already-encoded URLs from links and GET forms corrupted them: `%23` in a
+  form value became `#` and silently truncated the query, `%26` became `&`
+  and split parameters.
 - **WebExtension fix**: the history/bookmarks drawer was always visible — its
   `#drawer { display: flex }` rule outweighed the UA's `[hidden]` rule, so
   closing it never actually hid it. An explicit `#drawer[hidden]` rule restores

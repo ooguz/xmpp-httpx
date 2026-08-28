@@ -82,7 +82,10 @@ const gateway = await startGateway();
 await new Promise((resolve) => files.listen(PORT, resolve));
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+// One explicit context: the embedded-mode page below shares it, so the
+// settings the first page saves are there for the second one's auto-connect.
+const context = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+const page = await context.newPage();
 page.on("console", (message) => {
   // Playwright injects utility scripts into every frame; the sandbox blocks
   // them in our scriptless srcdoc documents — that is the sandbox working.
@@ -103,6 +106,10 @@ const titleContains = (text) =>
 
 try {
   await page.goto(`http://localhost:${PORT}/browser.html`);
+  // Chromium's own bookkeeping may add entries we don't control (iframe
+  // navigations, downloads), so history assertions measure growth from a
+  // baseline, not absolute length.
+  const baseline = await page.evaluate(() => history.length);
 
   await page.fill("#service", "ws://localhost:15280/xmpp-websocket");
   await page.fill("#jid", "alice@localhost");
@@ -229,6 +236,163 @@ try {
     if (download.suggestedFilename() !== "httpx-report.bin") {
       throw new Error(download.suggestedFilename());
     }
+  });
+  await step("a raw-typed path with a space loads and round-trips", async () => {
+    // tab.url keeps the raw space while location.hash serializes it to %20;
+    // the chrome sync must compare serialized spellings or it rewrites the
+    // hash on every sync (and, embedded, pushes duplicates).
+    await page.fill("#address", "httpx://web@httpx.localhost/nice page.html");
+    await page.press("#address", "Enter");
+    await titleContains("Nice page");
+    if (!(await pageText()).includes("path with a space")) throw new Error("wrong page");
+  });
+  await step("standalone: navigations never push session-history entries", async () => {
+    const length = await page.evaluate(() => history.length);
+    if (length !== baseline) throw new Error(`history.length=${length}, was ${baseline}`);
+  });
+
+  // --- embedded mode -------------------------------------------------------------
+  // A second page in the same context: same origin, so the settings saved by
+  // the connect above are found and the boot auto-connects. The host app
+  // (Klar) supplies the chrome; its back/forward walk the session history.
+  const emb = await context.newPage();
+  emb.on("console", (message) => {
+    const text = message.text();
+    if (message.type() === "error" && !text.includes("Blocked script execution")) {
+      problems.push(`embedded console: ${text}`);
+    }
+  });
+  emb.on("pageerror", (err) => problems.push(`embedded pageerror: ${err.message}`));
+  const embTitle = (want) =>
+    emb.waitForFunction((text) => document.title.includes(text), want, {
+      timeout: TIMEOUT,
+    });
+  const embText = async () =>
+    (await (await emb.$("#viewports iframe:not([hidden])")).contentFrame())
+      .locator("body")
+      .innerText();
+
+  await emb.goto(
+    `http://localhost:${PORT}/browser.html?embedded=1#httpx://web@httpx.localhost/`,
+  );
+  await embTitle("httpx demo");
+  const embBaseline = await emb.evaluate(() => history.length);
+
+  await step("embedded: the page's own chrome is hidden", async () => {
+    if (await emb.locator("#tabstrip").isVisible()) throw new Error("tab strip visible");
+    if (await emb.locator("#chrome").isVisible()) throw new Error("URL bar visible");
+  });
+  await step("embedded: a link click pushes one history entry", async () => {
+    // renderHtml resolves hrefs to absolute httpx URLs before display.
+    const frame = await (await emb.$("#viewports iframe:not([hidden])")).contentFrame();
+    await frame.locator('a[href$="about.html"]').click();
+    await embTitle("About");
+    const length = await emb.evaluate(() => history.length);
+    if (length !== embBaseline + 1) {
+      throw new Error(`history.length=${length}, was ${embBaseline}`);
+    }
+  });
+  await step("embedded: the host's back returns to the previous page", async () => {
+    await emb.goBack();
+    await embTitle("httpx demo");
+    const text = await embText();
+    if (!text.includes("Hello from XEP-0332")) throw new Error(text.slice(0, 200));
+  });
+  await step("embedded: the host's forward works, with no duplicate entry", async () => {
+    await emb.goForward();
+    await embTitle("About");
+    const length = await emb.evaluate(() => history.length);
+    if (length !== embBaseline + 1) {
+      throw new Error(`history.length=${length}, was ${embBaseline}`);
+    }
+  });
+  await step("embedded: an encoded-path link pushes exactly one entry", async () => {
+    await emb.goBack();
+    await embTitle("httpx demo");
+    const frame = await (await emb.$("#viewports iframe:not([hidden])")).contentFrame();
+    await frame.locator('a[href$="nice%20page.html"]').click();
+    await embTitle("Nice page");
+    // The forward entry (About) is truncated by the push, so the length must
+    // land back at baseline+1: a raw-vs-serialized hash mismatch would have
+    // pushed a duplicate on load completion and made it +2.
+    const length = await emb.evaluate(() => history.length);
+    if (length !== embBaseline + 1) {
+      throw new Error(`history.length=${length}, was ${embBaseline}`);
+    }
+  });
+  await step("embedded: back from the encoded page is not a dead press", async () => {
+    await emb.goBack();
+    await embTitle("httpx demo");
+    const text = await embText();
+    if (!text.includes("Hello from XEP-0332")) throw new Error(text.slice(0, 200));
+    const length = await emb.evaluate(() => history.length);
+    if (length !== embBaseline + 1) {
+      throw new Error(`traversal grew history to ${length}`);
+    }
+  });
+  await step("embedded: a non-canonical hash cannot trap the back button", async () => {
+    // Spelling the *current* page without its trailing slash pushes at most
+    // one entry (the assignment itself — from mid-stack it also truncates the
+    // forward entries, so the length may even stay put); the page must correct
+    // the spelling in place. A push here would re-push on every back press —
+    // an inescapable loop that grows the history each time.
+    const before = await emb.evaluate(() => history.length);
+    await emb.evaluate(() => {
+      window.location.hash = "#httpx://web@httpx.localhost";
+    });
+    await emb.waitForFunction(
+      () => window.location.hash === "#httpx://web@httpx.localhost/",
+      { timeout: TIMEOUT },
+    );
+    const after = await emb.evaluate(() => history.length);
+    if (after > before + 1) {
+      throw new Error(`hash correction grew history: ${before} -> ${after}`);
+    }
+    await emb.goBack();
+    await emb.waitForTimeout(500);
+    const settled = await emb.evaluate(() => history.length);
+    if (settled > after) {
+      throw new Error(`a back press grew history: ${after} -> ${settled}`);
+    }
+  });
+  await step("embedded: a freshly typed attachment URL saves immediately", async () => {
+    // Arrives as hashchange (the host toolbar's only channel) but is not a
+    // spelling the page mirrored — so it must be treated as fresh and save.
+    const wait = emb.waitForEvent("download", { timeout: TIMEOUT });
+    await emb.evaluate(() => {
+      window.location.hash = "#httpx://web@httpx.localhost/download/report.bin";
+    });
+    const download = await wait;
+    if (download.suggestedFilename() !== "httpx-report.bin") {
+      throw new Error(download.suggestedFilename());
+    }
+  });
+  await step("embedded: traversing back over the receipt never re-saves", async () => {
+    let resaved = false;
+    emb.on("download", () => {
+      resaved = true;
+    });
+    await emb.goBack();
+    await embTitle("httpx demo");
+    await emb.goForward();
+    await embTitle("httpx-report.bin");
+    await emb.waitForTimeout(500);
+    if (resaved) throw new Error("history traversal re-saved the attachment");
+  });
+
+  // The omnibox deep link arrives wholly percent-encoded (background.js
+  // builds "#" + encodeURIComponent(url)); boot must decode exactly that.
+  const omni = await context.newPage();
+  await step("an encoded omnibox deep link boots to the page", async () => {
+    await omni.goto(
+      `http://localhost:${PORT}/browser.html#httpx%3A%2F%2Fweb%40httpx.localhost%2F`,
+    );
+    await omni.waitForFunction(
+      () => document.title.includes("httpx demo"),
+      { timeout: TIMEOUT },
+    );
+    const shown = await omni.inputValue("#address");
+    if (shown !== "httpx://web@httpx.localhost/") throw new Error(shown);
   });
 } finally {
   await browser.close();

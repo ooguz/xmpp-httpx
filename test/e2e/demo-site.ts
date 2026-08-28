@@ -37,6 +37,7 @@ const PAGES: Record<string, { type: string; body: string | Uint8Array }> = {
 <h1>Hello from XEP-0332 <span class="badge"></span></h1>
 <p>This page traveled inside an XMPP stanza.</p>
 <p><a href="about.html">About (relative link)</a> · <a href="/img/logo.png">Logo</a>
+ · <a href="nice%20page.html">Encoded link</a>
  · <a href="/download/report.bin">Download</a></p>
 <img src="img/logo.png" alt="logo">
 <form action="/search" method="get">
@@ -53,6 +54,14 @@ const PAGES: Record<string, { type: string; body: string | Uint8Array }> = {
     type: "text/html; charset=utf-8",
     body: `<!doctype html><html>${HEAD.replace("<title>httpx demo</title>", "<title>About — httpx demo</title>")}<body><h1>About</h1>
 <p>Served by a XEP-0114 component over XEP-0332.</p>
+<p><a href="/">Home</a></p></body></html>`,
+  },
+  // Keyed decoded; the resource lookup decodes, so /nice%20page.html and a
+  // raw-typed /nice page.html both land here — exercises URL encoding paths.
+  "/nice page.html": {
+    type: "text/html; charset=utf-8",
+    body: `<!doctype html><html>${HEAD.replace("<title>httpx demo</title>", "<title>Nice page — httpx demo</title>")}<body><h1>Nice page</h1>
+<p>A path with a space, reached through an encoded link.</p>
 <p><a href="/">Home</a></p></body></html>`,
   },
   "/img/logo.png": { type: "image/png", body: LOGO_PNG },
@@ -144,7 +153,13 @@ export const demoSiteHandler: HttpxHandler = async (req) => {
     };
   }
 
-  const found = PAGES[path];
+  let lookup = path;
+  try {
+    lookup = decodeURIComponent(path);
+  } catch {
+    // A literal % — look up the raw path.
+  }
+  const found = PAGES[lookup];
   if (!found) {
     return { status: 404, statusMessage: "Not Found", body: "not found" };
   }

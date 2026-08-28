@@ -9,7 +9,7 @@ import {
 import { Connection } from "./connection.js";
 import { buildDrawerList, type DrawerEntry } from "./drawer.js";
 import { filenameFor, isAttachment, isRenderableType, saveBlob } from "./download.js";
-import { applyEmbedded } from "./embedded.js";
+import { applyEmbedded, historyWriteMode } from "./embedded.js";
 import type { FormRefusal, FormSubmission } from "./forms.js";
 import {
   clearHistory,
@@ -47,7 +47,7 @@ const drawerEmpty = $<HTMLParagraphElement>("drawerEmpty");
 const favicon = $<HTMLLinkElement>("favicon");
 const DEFAULT_FAVICON = favicon.getAttribute("href") ?? "";
 
-applyEmbedded(document, window.location.search);
+const embedded = applyEmbedded(document, window.location.search);
 
 const connection = new Connection();
 connection.onStateChange = (state) => {
@@ -68,10 +68,19 @@ interface TabResources {
   cacheState: CacheState;
   /** Page title, for bookmarks and history. */
   pageTitle?: string;
-  /** A load is in flight; closing must not detach the iframe yet. */
-  loading: boolean;
-  /** Close was requested mid-load; drop the tab once the load settles. */
+  /** Loads in flight; closing must not detach the iframe while any remain. */
+  loading: number;
+  /** Close was requested mid-load; drop the tab once the loads settle. */
   discard: boolean;
+  /**
+   * Monotonic id of the newest load started on this tab. A load that awoke
+   * from an await to find a newer id bails out instead of rendering: without
+   * this, a slow fetch that lost the race would paint its page into the
+   * iframe *after* the winner, leaving content and URL disagreeing — reachable
+   * standalone via the back/forward buttons, and embedded via two quick host
+   * back presses.
+   */
+  loadSeq: number;
 }
 
 const tabs = new TabSet();
@@ -95,8 +104,9 @@ function resourcesFor(id: number): TabResources {
     iframe,
     faviconHref: DEFAULT_FAVICON,
     cacheState: "bypass",
-    loading: false,
+    loading: 0,
     discard: false,
+    loadSeq: 0,
   };
   resources.set(id, created);
   return created;
@@ -117,6 +127,37 @@ function renderTabStrip(): void {
   );
 }
 
+/**
+ * The exact spelling the browser's history stores for a URL placed in the
+ * hash: location.hash reads back WHATWG-serialized, with spaces and non-ASCII
+ * percent-encoded. Tab URLs are canonicalized to this spelling when visited,
+ * so the hash, the per-tab stacks, the cache keys and the wire resource can
+ * never disagree about a page's identity. Idempotent — "%" is not in the
+ * fragment percent-encode set, so a serialized spelling is a fixed point.
+ */
+function serializedSpelling(url: string): string {
+  return new URL(`#${url}`, window.location.href).hash.slice(1);
+}
+
+/**
+ * The active tab's URL at the previous chrome sync — how syncChrome tells a
+ * real navigation (push-worthy when embedded) from a mere re-spelling of the
+ * current page's hash, which must replace: pushing a spelling correction lets
+ * one non-canonical hash re-push the canonical entry on every host back press,
+ * trapping the traversal forever.
+ */
+let lastSyncedUrl = "";
+
+/**
+ * Every hash spelling this page has itself mirrored into the session history.
+ * The hashchange listener uses it to tell a traversal (re-entering an entry we
+ * wrote — a revisit) from a fresh navigation arriving through the hash (a URL
+ * typed into the host app's toolbar, a hand-edited deep link) — a distinction
+ * that matters for attachments: a fresh navigation saves the file, a revisit
+ * renders the receipt only.
+ */
+const mirroredHashes = new Set<string>();
+
 /** Pushes all per-tab state into the shared chrome. */
 function syncChrome(): void {
   const tab = tabs.active;
@@ -135,13 +176,43 @@ function syncChrome(): void {
 
   // The hash mirrors the active tab so deep links stay copyable; it is no
   // longer the source of truth (each tab owns its own back/forward stack).
-  const hash = tab.url === "" ? "" : `#${tab.url}`;
+  // Embedded, the mirror doubles as the session history the host app's back
+  // button walks, so page-to-page moves push — see historyWriteMode.
+  //
+  // Compare (and write) what the browser will *store*: location.hash reads
+  // back WHATWG-serialized. Tab URLs are canonicalized to that spelling on
+  // visit, and serializedSpelling is idempotent, so this is normally a plain
+  // equality — the serialization here only defends entries that predate the
+  // canonicalization (old drawer data), where a raw-vs-serialized mismatch
+  // would otherwise look like a permanently pending write.
+  const hash = tab.url === "" ? "" : `#${serializedSpelling(tab.url)}`;
+  const current = window.location.hash.slice(1);
+  // A write that merely corrects the spelling of the entry we are on (a typed
+  // "#httpx://host" landing on the canonical "httpx://host/") replaces even
+  // though the tab URL changed: the entry is the same page, not a move, and
+  // pushing it would leave a duplicate entry behind every typo.
+  let respelling = false;
+  if (current !== "" && `#${current}` !== hash) {
+    try {
+      respelling =
+        serializedSpelling(parseHttpxUrl(normalizeUrl(current)).href) === tab.url;
+    } catch {
+      respelling = false;
+    }
+  }
+  const navigated = tab.url !== lastSyncedUrl && !respelling;
+  lastSyncedUrl = tab.url;
   if (window.location.hash !== hash) {
     // A relative "#…" URL keeps the query string; the empty-tab branch must
     // carry it explicitly or the ?embedded flag would vanish from the URL.
     const bare = window.location.pathname + window.location.search;
-    history.replaceState(null, "", hash === "" ? bare : hash);
+    if (historyWriteMode(embedded, navigated, window.location.hash, hash) === "push") {
+      history.pushState(null, "", hash);
+    } else {
+      history.replaceState(null, "", hash === "" ? bare : hash);
+    }
   }
+  if (hash !== "") mirroredHashes.add(hash.slice(1));
   void refreshBookmarkButton(tab.url);
 }
 
@@ -198,13 +269,24 @@ function renderNewTabPage(iframe: HTMLIFrameElement): Promise<void> {
 /** "ext+httpx://…" (Firefox protocol handler) → "httpx://…". */
 function normalizeUrl(raw: string): string {
   let url = raw.trim();
-  try {
-    url = decodeURIComponent(url).trim();
-  } catch {
-    // A literal % in the path — use the raw value.
-  }
-  if (url.toLowerCase().startsWith("ext+httpx://")) {
-    url = `httpx://${url.slice("ext+httpx://".length)}`;
+  // Two inputs arrive wholly percent-encoded and are decoded: the Firefox
+  // protocol handler's %s placeholder ("ext+httpx://…", possibly itself
+  // encoded), and the background script's omnibox deep link, which builds
+  // "browser.html#" + encodeURIComponent(url) — an encoded scheme separator
+  // ("httpx%3A") never occurs in a real URL, so the test cannot misfire.
+  // Everything else — links, forms, the drawer, history traversals — is
+  // already correctly encoded; decoding those corrupts the request (%23 in a
+  // form value becomes "#" and truncates the query at the fragment, %26
+  // becomes "&" and splits parameters).
+  if (/^(ext\+|ext%2b)httpx|^httpx%3a/i.test(url)) {
+    try {
+      url = decodeURIComponent(url).trim();
+    } catch {
+      // A literal % in the path — use the raw value.
+    }
+    if (url.toLowerCase().startsWith("ext+httpx://")) {
+      url = `httpx://${url.slice("ext+httpx://".length)}`;
+    }
   }
   if (url !== "" && !url.includes("://")) {
     url = `httpx://${url}`;
@@ -225,13 +307,14 @@ const fetchResource = async (resourceUrl: string): Promise<Blob> => {
 
 /**
  * GETs go through the HTTP cache; POSTs bypass it and invalidate the entry for
- * the URL they targeted, the way browsers treat unsafe methods.
+ * the URL they targeted, the way browsers treat unsafe methods. Returns the
+ * cache state instead of storing it: the caller applies it only if its load is
+ * still current, so a superseded fetch cannot mislabel the winner's chip.
  */
 async function fetchThroughCache(
   href: string,
-  res: TabResources,
   init: { method?: "GET" | "POST"; body?: URLSearchParams; reload?: boolean },
-): Promise<Response> {
+): Promise<{ response: Response; state: CacheState }> {
   const request = (headers?: Record<string, string>): Promise<Response> =>
     httpxFetch(href, {
       session: connection.session,
@@ -243,15 +326,12 @@ async function fetchThroughCache(
   if (init.method === "POST") {
     const response = await request();
     await invalidate(href);
-    res.cacheState = "bypass";
-    return response;
+    return { response, state: "bypass" };
   }
 
-  const { response, state } = await cachedFetch(href, request, {
+  return cachedFetch(href, request, {
     ...(init.reload ? { reload: true } : {}),
   });
-  res.cacheState = state;
-  return response;
 }
 
 const CACHE_LABELS: Record<CacheState, string> = {
@@ -274,22 +354,34 @@ function showCacheChip(state: CacheState): void {
         : "Fetched over XMPP";
 }
 
-/** Navigates the active tab, recording the move in that tab's history. */
-async function navigate(rawUrl: string): Promise<void> {
+/**
+ * Navigates the active tab, recording the move in that tab's history.
+ * `revisit` marks a navigation that re-enters a URL from history (a host
+ * back/forward traversal, a hand-edited hash) rather than a fresh activation —
+ * an attachment reached that way renders its receipt without saving again.
+ */
+async function navigate(
+  rawUrl: string,
+  opts: { revisit?: boolean } = {},
+): Promise<void> {
   const url = normalizeUrl(rawUrl);
   if (url === "") return;
 
   let href: string;
   try {
-    href = parseHttpxUrl(url).href;
+    href = serializedSpelling(parseHttpxUrl(url).href);
   } catch (err) {
+    // The typo still takes an entry — like a browser's error page — so a host
+    // back/forward walks over it consistently instead of finding the hash and
+    // the rendered page disagreeing about where it is.
+    tabs.visit(serializedSpelling(url));
     await showError(tabs.active.id, `Not an httpx URL: ${url}`, err);
     return;
   }
 
   tabs.visit(href);
   syncChrome();
-  await load(href);
+  await load(href, opts.revisit ? { revisit: true } : {});
 }
 
 /**
@@ -303,14 +395,19 @@ async function load(
     method?: "GET" | "POST";
     body?: URLSearchParams;
     reload?: boolean;
+    revisit?: boolean;
   } = {},
 ): Promise<void> {
   const tab = tabs.active;
   const res = resourcesFor(tab.id);
   const isActive = () => tabs.active.id === tab.id;
+  const seq = ++res.loadSeq;
+  // Checked after every await that can outlast a newer load on this tab; the
+  // remaining unguarded window (inside a render, single-digit ms) is accepted.
+  const fresh = () => res.loadSeq === seq;
 
   releasePage(res);
-  res.loading = true;
+  res.loading += 1;
 
   try {
     if (connection.state !== "online") {
@@ -333,19 +430,32 @@ async function load(
       return;
     }
 
-    const response = await fetchThroughCache(href, res, init);
+    const { response, state } = await fetchThroughCache(href, init);
+    if (!fresh()) return;
+    res.cacheState = state;
     const contentType = response.headers.get("content-type") ?? "";
     const disposition = response.headers.get("content-disposition");
 
     if (isAttachment(disposition) || !isRenderableType(contentType)) {
-      // A saved file is not a page: no title, no history entry.
-      await download(href, tab.id, res, response, disposition);
+      // A saved file is not a page: no title, no drawer entry. A revisit gets
+      // the receipt only, never a save; its unread body is cancelled, which
+      // skips the transfer on the cache-bypass path (a Cache-API-backed fetch
+      // may already have buffered it). The receipt's button re-loads fresh.
+      let blob: Blob | null = null;
+      if (init.revisit) {
+        void response.body?.cancel().catch(() => {});
+      } else {
+        blob = await response.blob();
+        if (!fresh()) return;
+      }
+      await download(href, tab.id, res, blob, contentType, disposition);
       if (isActive()) syncChrome();
       return;
     }
 
     if (contentType.includes("text/html")) {
       const html = await response.text();
+      if (!fresh()) return;
       const meta = extractPageMeta(html, href);
       res.cleanup = await renderHtml(html, href, {
         iframe: res.iframe,
@@ -361,7 +471,9 @@ async function load(
       });
       applyPageMeta(tab.id, res, href, meta);
     } else {
-      res.cleanup = await renderPlain(contentType, await response.blob(), {
+      const blob = await response.blob();
+      if (!fresh()) return;
+      res.cleanup = await renderPlain(contentType, blob, {
         iframe: res.iframe,
       });
       res.pageTitle = undefined;
@@ -379,10 +491,15 @@ async function load(
     }
     if (isActive()) syncChrome();
   } catch (err) {
-    await showError(tab.id, `Failed to load ${href}`, err);
+    if (fresh()) {
+      await showError(tab.id, `Failed to load ${href}`, err);
+    } else {
+      // A superseded load's failure must not overwrite the winner's page.
+      console.warn("[httpx] superseded load failed:", href, err);
+    }
   } finally {
-    res.loading = false;
-    if (res.discard) {
+    res.loading -= 1;
+    if (res.discard && res.loading === 0) {
       res.cleanup?.();
       res.iframe.remove();
       resources.delete(tab.id);
@@ -424,30 +541,37 @@ async function submitForm(
   // the next chrome sync. It stays out of the persistent visit history (the
   // drawer) because it is not something to reopen later. Back/forward onto it
   // re-issues a plain GET; the body is not replayed.
-  tabs.visit(submission.url);
+  const target = serializedSpelling(submission.url);
+  tabs.visit(target);
   syncChrome();
-  await load(submission.url, { method: "POST", body: submission.body });
+  await load(target, { method: "POST", body: submission.body });
 }
 
-/** Content the viewport can't show is saved instead, with a receipt page. */
+/**
+ * Content the viewport can't show is saved instead, with a receipt page.
+ * A null blob renders the receipt without saving (a revisit via history
+ * traversal must not re-save a file with no user gesture); the receipt's
+ * button then loads fresh and saves.
+ */
 async function download(
   href: string,
   id: number,
   res: TabResources,
-  response: Response,
+  blob: Blob | null,
+  contentType: string,
   disposition: string | null,
 ): Promise<void> {
   const filename = filenameFor(href, disposition);
-  res.cleanup = saveBlob(await response.blob(), filename);
+  if (blob) res.cleanup = saveBlob(blob, filename);
   res.pageTitle = filename;
   tabs.setTitle(id, filename);
   await renderError(
     res.iframe,
     {
       icon: "⤓",
-      heading: `Downloading ${filename}`,
-      detail: `${href}\n${response.headers.get("content-type") ?? "unknown type"}`,
-      actions: [{ id: "again", label: "Download again" }],
+      heading: blob ? `Downloading ${filename}` : filename,
+      detail: `${href}\n${contentType || "unknown type"}`,
+      actions: [{ id: "again", label: blob ? "Download again" : "Download" }],
     },
     () => void load(href),
   );
@@ -569,15 +693,17 @@ $<HTMLFormElement>("nav").addEventListener("submit", (event) => {
   event.preventDefault();
   void navigate(address.value);
 });
+// The in-page history buttons are traversals too: an attachment entry crossed
+// this way renders its receipt without re-saving the file (see download).
 backBtn.addEventListener("click", () => {
   const url = tabs.back();
   syncChrome();
-  if (url) void load(url);
+  if (url) void load(url, { revisit: true });
 });
 forwardBtn.addEventListener("click", () => {
   const url = tabs.forward();
   syncChrome();
-  if (url) void load(url);
+  if (url) void load(url, { revisit: true });
 });
 reloadBtn.addEventListener("click", () => {
   // Reload skips the freshness check but still revalidates: an unchanged page
@@ -630,11 +756,20 @@ bookmarkBtn.addEventListener("click", () => {
   })();
 });
 
-// A deep link or a hand-edited hash: load it into the active tab. Our own
-// updates use replaceState, which fires no hashchange, so this cannot loop.
+// A deep link, a hand-edited hash, or — embedded — the host app's back and
+// forward buttons traversing the entries syncChrome pushed. Our own updates
+// use replaceState/pushState, which fire no hashchange, so this cannot loop;
+// and because a traversal lands here with the location already updated, the
+// navigate below re-syncs without writing a duplicate history entry.
 window.addEventListener("hashchange", () => {
   const wanted = window.location.hash.slice(1);
-  if (wanted !== "" && wanted !== tabs.active.url) void navigate(wanted);
+  if (wanted !== "" && wanted !== tabs.active.url) {
+    // A spelling this page itself mirrored into the history is a traversal
+    // re-entering an existing entry — a revisit. Anything else (a URL typed
+    // into the host app's toolbar, a hand-edited deep link) is a fresh
+    // navigation: the difference decides whether an attachment saves.
+    void navigate(wanted, { revisit: mirroredHashes.has(wanted) });
+  }
 });
 
 // --- settings ----------------------------------------------------------------
@@ -683,8 +818,12 @@ void (async () => {
   }
 
   syncChrome();
-  if (initial) {
-    void navigate(initial);
+  // The user may have navigated while the auto-connect was in flight (the
+  // hashchange listener is already live); that choice wins over the boot
+  // hash, and re-navigating it retries the load now that the session is up.
+  const target = tabs.active.url || initial;
+  if (target) {
+    void navigate(target);
   } else {
     void renderNewTabPage(resourcesFor(tabs.active.id).iframe);
     if (connection.state !== "online") settingsDialog.showModal();

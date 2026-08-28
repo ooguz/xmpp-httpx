@@ -48,6 +48,8 @@ export default tseslint.config(
       globals: {
         document: "readonly",
         getComputedStyle: "readonly",
+        history: "readonly",
+        window: "readonly",
       },
     },
   },

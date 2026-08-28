@@ -34,6 +34,7 @@ const PAGES = {
 <h1>Hello from XEP-0332 <span class="badge"></span></h1>
 <p>This page traveled inside XMPP stanzas — no HTTP connection anywhere.</p>
 <p><a href="about.html">About (relative link)</a>
+ · <a href="nice%20page.html">Encoded link</a>
  · <a href="/download/report.bin">Download</a></p>
 <img src="img/logo.png" alt="logo">
 <form action="/search" method="get">
@@ -50,6 +51,14 @@ const PAGES = {
     type: "text/html; charset=utf-8",
     body: `<!doctype html><html>${HEAD.replace("<title>httpx demo</title>", "<title>About — httpx demo</title>")}<body><h1>About</h1>
 <p>Served by scripts/demo-gateway.mjs over the local Prosody component.</p>
+<p><a href="/">Home</a></p></body></html>`,
+  },
+  // Keyed decoded; the resource lookup decodes, so /nice%20page.html and a
+  // raw-typed /nice page.html both land here — exercises URL encoding paths.
+  "/nice page.html": {
+    type: "text/html; charset=utf-8",
+    body: `<!doctype html><html>${HEAD.replace("<title>httpx demo</title>", "<title>Nice page — httpx demo</title>")}<body><h1>Nice page</h1>
+<p>A path with a space, reached through an encoded link.</p>
 <p><a href="/">Home</a></p></body></html>`,
   },
   "/img/logo.png": { type: "image/png", body: LOGO_PNG },
@@ -143,7 +152,13 @@ server.handle(async (req) => {
     };
   }
 
-  const found = PAGES[path];
+  let lookup = path;
+  try {
+    lookup = decodeURIComponent(path);
+  } catch {
+    // A literal % — look up the raw path.
+  }
+  const found = PAGES[lookup];
   if (!found) return { status: 404, statusMessage: "Not Found", body: "not found" };
 
   const etag = etagFor(found.body);
