@@ -38,10 +38,16 @@
       <button id="drawerBtn" title="History and bookmarks" aria-label="History" aria-expanded="false">
         ☰
       </button>
+      <span id="progressBytes" class="chip" hidden></span>
       <span id="cacheState" class="chip" hidden></span>
       <span id="status" class="chip" data-state="disconnected" title="XMPP connection">offline</span>
       <button id="settingsBtn" title="Connection settings" aria-label="Settings">⚙</button>
     </header>
+
+    <!-- Byte progress of the active tab's load. Outside #chrome on purpose:
+         embedded mode hides the chrome, and the host app has no window onto
+         this page's transfers — the bar is the one loading signal it gets. -->
+    <progress id="loadProgress" hidden></progress>
 
     <dialog id="settings">
       <form method="dialog" id="settingsForm">

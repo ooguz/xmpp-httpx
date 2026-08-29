@@ -274,3 +274,64 @@ describe("cache scoping", () => {
     }
   });
 });
+
+describe("progress reporting", () => {
+  it("reports byte progress on a miss, and nothing on a hit", async () => {
+    const s = server(() =>
+      html("x".repeat(2048), {
+        "cache-control": "max-age=600",
+        "content-length": "2048",
+      }),
+    );
+
+    const missReports: { received: number; total: number | null }[] = [];
+    const miss = await cachedFetch(URL_A, s.fetcher, {
+      onProgress: (p) => missReports.push(p),
+    });
+    expect(miss.state).toBe("miss");
+    expect(missReports.length).toBeGreaterThanOrEqual(2);
+    expect(missReports[0]).toEqual({ received: 0, total: 2048 });
+    expect(missReports.at(-1)).toEqual({ received: 2048, total: 2048 });
+    expect((await miss.response.text()).length).toBe(2048);
+
+    // A hit serves the stored body — nothing to wait for, nothing to report.
+    const hitReports: unknown[] = [];
+    const hit = await cachedFetch(URL_A, s.fetcher, {
+      onProgress: (p) => hitReports.push(p),
+    });
+    expect(hit.state).toBe("hit");
+    expect(hitReports).toEqual([]);
+  });
+
+  it("rebuilds a null-body status without throwing", async () => {
+    const s = server(() => new Response(null, { status: 204 }));
+    const result = await cachedFetch(URL_A, s.fetcher);
+    expect(result.response.status).toBe(204);
+    expect(await result.response.text()).toBe("");
+  });
+});
+
+describe("revalidation revoking storage", () => {
+  it("a 304 carrying no-store evicts the entry instead of re-storing it", async () => {
+    const s = server((headers, call) =>
+      call === 1
+        ? html("<p>secret</p>", { "cache-control": "max-age=0", etag: '"v1"' })
+        : call === 2
+          ? new Response(null, {
+              status: 304,
+              headers: { "cache-control": "no-store" },
+            })
+          : html("<p>fresh</p>"),
+    );
+
+    await (await cachedFetch(URL_A, s.fetcher)).response.text(); // stored
+    const reval = await cachedFetch(URL_A, s.fetcher);
+    expect(reval.state).toBe("revalidated");
+    expect(await reval.response.text()).toBe("<p>secret</p>"); // still served once
+
+    // The entry is gone: the next fetch goes out unconditionally.
+    const third = await cachedFetch(URL_A, s.fetcher);
+    expect(await third.response.text()).toBe("<p>fresh</p>");
+    expect(s.seen[2]).toBeUndefined();
+  });
+});

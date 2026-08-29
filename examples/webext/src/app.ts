@@ -22,6 +22,12 @@ import {
   toggleBookmark,
 } from "./history.js";
 import { extractPageMeta, type PageMeta } from "./page-meta.js";
+import {
+  bufferBody,
+  formatProgress,
+  type LoadProgress,
+  type ProgressCallback,
+} from "./progress.js";
 import { renderError, renderHtml, renderPlain } from "./render.js";
 import { loadSettings, saveSettings, type ConnectionSettings } from "./settings.js";
 import { buildTabStrip } from "./tab-strip.js";
@@ -36,6 +42,8 @@ const tabList = $<HTMLUListElement>("tabs");
 const status = $<HTMLSpanElement>("status");
 const settingsDialog = $<HTMLDialogElement>("settings");
 const cacheChip = $<HTMLSpanElement>("cacheState");
+const loadBar = $<HTMLProgressElement>("loadProgress");
+const progressBytes = $<HTMLSpanElement>("progressBytes");
 const bookmarkBtn = $<HTMLButtonElement>("bookmark");
 const backBtn = $<HTMLButtonElement>("back");
 const forwardBtn = $<HTMLButtonElement>("forward");
@@ -70,6 +78,8 @@ interface TabResources {
   pageTitle?: string;
   /** Loads in flight; closing must not detach the iframe while any remain. */
   loading: number;
+  /** Byte progress of the current load, or null when nothing is loading. */
+  progress: LoadProgress | null;
   /** Close was requested mid-load; drop the tab once the loads settle. */
   discard: boolean;
   /**
@@ -105,6 +115,7 @@ function resourcesFor(id: number): TabResources {
     faviconHref: DEFAULT_FAVICON,
     cacheState: "bypass",
     loading: 0,
+    progress: null,
     discard: false,
     loadSeq: 0,
   };
@@ -169,6 +180,7 @@ function syncChrome(): void {
   document.title = tab.url === "" ? "httpx browser" : `${tab.title} — httpx`;
   favicon.setAttribute("href", res.faviconHref);
   showCacheChip(res.cacheState);
+  showProgress(res.progress);
   backBtn.disabled = !tabs.canGoBack();
   forwardBtn.disabled = !tabs.canGoForward();
   reloadBtn.disabled = tab.url === "";
@@ -314,6 +326,7 @@ const fetchResource = async (resourceUrl: string): Promise<Blob> => {
 async function fetchThroughCache(
   href: string,
   init: { method?: "GET" | "POST"; body?: URLSearchParams; reload?: boolean },
+  onProgress?: ProgressCallback,
 ): Promise<{ response: Response; state: CacheState }> {
   const request = (headers?: Record<string, string>): Promise<Response> =>
     httpxFetch(href, {
@@ -331,6 +344,7 @@ async function fetchThroughCache(
 
   return cachedFetch(href, request, {
     ...(init.reload ? { reload: true } : {}),
+    ...(onProgress ? { onProgress } : {}),
   });
 }
 
@@ -352,6 +366,33 @@ function showCacheChip(state: CacheState): void {
       : state === "revalidated"
         ? "Server confirmed the cached copy with a 304"
         : "Fetched over XMPP";
+}
+
+/**
+ * The thin bar under the chrome (visible in embedded mode too — the host app
+ * has no window onto this page's transfers) plus a byte chip next to the cache
+ * chip. Indeterminate until a usable Content-Length arrives with the response.
+ */
+function showProgress(progress: LoadProgress | null): void {
+  if (progress === null) {
+    loadBar.hidden = true;
+    progressBytes.hidden = true;
+    return;
+  }
+  if (progress.total !== null && progress.total > 0) {
+    loadBar.max = progress.total;
+    loadBar.value = progress.received;
+  } else {
+    // A <progress> with no value attribute renders indeterminate; assigning
+    // .value sets the attribute, so switching back means removing it.
+    loadBar.removeAttribute("value");
+  }
+  const label = formatProgress(progress);
+  loadBar.title = label;
+  loadBar.setAttribute("aria-label", `Loading: ${label}`);
+  progressBytes.textContent = label;
+  loadBar.hidden = false;
+  progressBytes.hidden = false;
 }
 
 /**
@@ -408,6 +449,14 @@ async function load(
 
   releasePage(res);
   res.loading += 1;
+  // Progress belongs to this load; a superseded load must not drive the
+  // winner's bar, so every report re-checks freshness.
+  const onProgress: ProgressCallback = (progress) => {
+    if (!fresh()) return;
+    res.progress = progress;
+    if (isActive()) showProgress(progress);
+  };
+  onProgress({ received: 0, total: null });
 
   try {
     if (connection.state !== "online") {
@@ -430,11 +479,42 @@ async function load(
       return;
     }
 
-    const { response, state } = await fetchThroughCache(href, init);
+    const { response, state } = await fetchThroughCache(href, init, onProgress);
     if (!fresh()) return;
     res.cacheState = state;
     const contentType = response.headers.get("content-type") ?? "";
     const disposition = response.headers.get("content-disposition");
+    // Where the wait happens decides who reports: the cache layer buffers (and
+    // reports) every response it touches, so consuming those again is instant
+    // and must stay silent — replaying the count would snap the bar back to
+    // zero. Only a "bypass" response (POST, degraded no-Cache-API mode) is
+    // still the live network stream when it reaches the reads below.
+    const report = state === "bypass" ? onProgress : undefined;
+
+    if (response.status === 204 || response.status === 205) {
+      // No content to paint. A mainstream browser stays on the page when a
+      // form POST answers 204, but this model commits the navigation before
+      // the status is known — so an explicit receipt beats rendering the
+      // empty body as a blank page. Not recorded as a visit: not a page.
+      res.pageTitle = undefined;
+      tabs.setTitle(tab.id, `(${response.status}) ${href}`);
+      await renderError(
+        res.iframe,
+        {
+          icon: "✓",
+          heading: "Nothing to show",
+          detail: `The server accepted the request and answered ${response.status} — there is no content to display.\n${href}`,
+          actions: [{ id: "back", label: "Back" }],
+        },
+        () => {
+          const url = tabs.back();
+          syncChrome();
+          if (url) void load(url, { revisit: true });
+        },
+      );
+      if (isActive()) syncChrome();
+      return;
+    }
 
     if (isAttachment(disposition) || !isRenderableType(contentType)) {
       // A saved file is not a page: no title, no drawer entry. A revisit gets
@@ -445,7 +525,7 @@ async function load(
       if (init.revisit) {
         void response.body?.cancel().catch(() => {});
       } else {
-        blob = await response.blob();
+        blob = await bufferBody(response, report);
         if (!fresh()) return;
       }
       await download(href, tab.id, res, blob, contentType, disposition);
@@ -454,7 +534,7 @@ async function load(
     }
 
     if (contentType.includes("text/html")) {
-      const html = await response.text();
+      const html = await (await bufferBody(response, report)).text();
       if (!fresh()) return;
       const meta = extractPageMeta(html, href);
       res.cleanup = await renderHtml(html, href, {
@@ -471,7 +551,7 @@ async function load(
       });
       applyPageMeta(tab.id, res, href, meta);
     } else {
-      const blob = await response.blob();
+      const blob = await bufferBody(response, report);
       if (!fresh()) return;
       res.cleanup = await renderPlain(contentType, blob, {
         iframe: res.iframe,
@@ -499,6 +579,12 @@ async function load(
     }
   } finally {
     res.loading -= 1;
+    // Cleared only while still the newest load: a superseded load settling
+    // late must not take down the bar its successor is driving.
+    if (fresh()) {
+      res.progress = null;
+      if (isActive()) showProgress(null);
+    }
     if (res.discard && res.loading === 0) {
       res.cleanup?.();
       res.iframe.remove();
@@ -521,6 +607,8 @@ async function submitForm(
   const res = resourcesFor(tabs.active.id);
   if (!submission) {
     const current = tabs.active.url;
+    supersedeLoads(res);
+    showProgress(null); // res is the active tab's by construction
     await renderError(
       res.iframe,
       {
@@ -619,9 +707,21 @@ async function loadFavicon(
   }
 }
 
+/**
+ * Takes a tab over for an error page: any load still in flight on it is
+ * superseded exactly as a newer load would supersede it — otherwise its bar
+ * keeps advancing over the error page and, worse, its render later paints
+ * over it, leaving the address bar and the viewport disagreeing.
+ */
+function supersedeLoads(res: TabResources): void {
+  res.loadSeq += 1;
+  res.progress = null;
+}
+
 async function showError(id: number, message: string, err: unknown): Promise<void> {
   console.error("[httpx]", message, err);
   const res = resourcesFor(id);
+  supersedeLoads(res);
   releasePage(res);
   tabs.setTitle(id, message);
   if (tabs.active.id === id) syncChrome();

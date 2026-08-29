@@ -237,6 +237,52 @@ try {
       throw new Error(download.suggestedFilename());
     }
   });
+  await step("a large download drives the progress bar, then it hides", async () => {
+    // Sample the bar while a body big enough to stream (256 KB over IBB)
+    // transfers: it must become visible, show the advertised total, and end
+    // hidden. Sampling beats event hooks here — no page code to instrument.
+    await page.evaluate(() => {
+      const bar = document.getElementById("loadProgress");
+      const chip = document.getElementById("progressBytes");
+      window.__progressSeen = [];
+      const timer = setInterval(() => {
+        if (!bar.hidden) {
+          window.__progressSeen.push({
+            value: bar.hasAttribute("value") ? bar.value : null,
+            max: bar.max,
+            chip: chip.textContent,
+          });
+        }
+      }, 10);
+      window.__progressStop = () => clearInterval(timer);
+    });
+    const wait = page.waitForEvent("download", { timeout: TIMEOUT });
+    await page.fill("#address", "httpx://web@httpx.localhost/download/big.bin");
+    await page.press("#address", "Enter");
+    const download = await wait;
+    if (download.suggestedFilename() !== "httpx-big.bin") {
+      throw new Error(download.suggestedFilename());
+    }
+    await page.waitForFunction(
+      () => document.getElementById("loadProgress").hidden,
+      null,
+      { timeout: TIMEOUT },
+    );
+    const seen = await page.evaluate(() => {
+      window.__progressStop();
+      return window.__progressSeen;
+    });
+    if (seen.length === 0) throw new Error("progress bar never became visible");
+    const sized = seen.filter((s) => s.value !== null && s.max === 256 * 1024);
+    if (sized.length === 0) {
+      throw new Error(
+        `bar never showed the advertised total: ${JSON.stringify(seen.slice(0, 5))}`,
+      );
+    }
+    if (!sized.at(-1).chip.includes("of 256 KB")) {
+      throw new Error(`byte chip said "${sized.at(-1).chip}"`);
+    }
+  });
   await step("a raw-typed path with a space loads and round-trips", async () => {
     // tab.url keeps the raw space while location.hash serializes it to %20;
     // the chrome sync must compare serialized spellings or it rewrites the
@@ -281,6 +327,13 @@ try {
   await step("embedded: the page's own chrome is hidden", async () => {
     if (await emb.locator("#tabstrip").isVisible()) throw new Error("tab strip visible");
     if (await emb.locator("#chrome").isVisible()) throw new Error("URL bar visible");
+    // The progress bar lives outside the chrome on purpose: it is the one
+    // loading signal the host app's user gets. Idle it hides via visibility,
+    // so its 3px track must still be in the layout.
+    const display = await emb
+      .locator("#loadProgress")
+      .evaluate((el) => getComputedStyle(el).display);
+    if (display === "none") throw new Error("progress track removed by embedding");
   });
   await step("embedded: a link click pushes one history entry", async () => {
     // renderHtml resolves hrefs to absolute httpx URLs before display.

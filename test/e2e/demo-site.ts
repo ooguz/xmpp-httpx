@@ -18,6 +18,17 @@ export const LOGO_PNG = decodeBase64(
 /** Sent as an attachment, so the browser saves it instead of showing it. */
 export const REPORT_BIN = new Uint8Array(64).fill(0x2a);
 
+/**
+ * Large enough that it must stream (IBB/chunked, many stanzas), and typed
+ * octet-stream so the gateway never compresses it away — the download whose
+ * transfer the progress bar has time to show.
+ */
+export const BIG_BIN = (() => {
+  const bytes = new Uint8Array(256 * 1024);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 31 + 7) & 0xff;
+  return bytes;
+})();
+
 const STYLE = `<style>
   body { max-width: 40rem; font-family: system-ui, sans-serif }
   h1 { border-bottom: 3px solid #1a56db; padding-bottom: 0.2rem }
@@ -38,7 +49,8 @@ const PAGES: Record<string, { type: string; body: string | Uint8Array }> = {
 <p>This page traveled inside an XMPP stanza.</p>
 <p><a href="about.html">About (relative link)</a> · <a href="/img/logo.png">Logo</a>
  · <a href="nice%20page.html">Encoded link</a>
- · <a href="/download/report.bin">Download</a></p>
+ · <a href="/download/report.bin">Download</a>
+ · <a href="/download/big.bin">Big download</a></p>
 <img src="img/logo.png" alt="logo">
 <form action="/search" method="get">
   <input name="q" placeholder="search" value="stanza">
@@ -150,6 +162,19 @@ export const demoSiteHandler: HttpxHandler = async (req) => {
         "content-disposition": 'attachment; filename="httpx-report.bin"',
       },
       body: REPORT_BIN,
+    };
+  }
+
+  if (path === "/download/big.bin") {
+    // The explicit Content-Length is what makes the browser's bar determinate.
+    return {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="httpx-big.bin"',
+        "content-length": String(BIG_BIN.length),
+      },
+      body: BIG_BIN,
     };
   }
 

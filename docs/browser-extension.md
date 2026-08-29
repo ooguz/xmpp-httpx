@@ -243,6 +243,24 @@ Bodies are buffered once and re-wrapped for both the caller and the cache.
 Teeing the stream instead would deadlock as soon as one side applied
 backpressure (the cache reads eagerly; a caller might never read at all).
 
+That buffering read is also where **byte progress** comes from
+(`src/progress.ts`). The pipeline deliberately renders a *complete* document
+(partial markup is where mXSS lives, and re-sanitizing a growing buffer is
+O(n²)), so "progressive rendering" here honestly means progressive
+*feedback*: `bufferBody` counts the bytes as they stream in over XMPP and
+reports them to a per-tab callback; a thin bar under the chrome plus a byte
+chip ("1.2 MB of 3.4 MB") show the transfer, then the page renders once, as
+before. The bar sits *outside* the chrome so embedded mode (the Klar fork)
+keeps it — the one loading signal the host app's user gets. Each load reports
+through exactly one consumption point, decided by the cache state: the cache
+layer's miss path, or `load()`'s read of a "bypass" response (POST, degraded
+no-Cache-API mode) — never both, so the count never restarts mid-load. A
+surviving `Content-Length` makes the bar determinate (the library deletes the
+header whenever it transparently decompresses, so one that survives describes
+the bytes actually counted); it is still treated as a hint — bytes outgrowing
+it drop the bar to indeterminate. Reports from a superseded load are discarded
+by the same `loadSeq` guard the renders use.
+
 Freshness implements the parts of RFC 9111 a browser cache actually needs:
 `no-store` (never stored), `no-cache` (stored but always revalidated),
 `max-age` measured against a stored-at stamp plus any `Age`, and `Expires` as
@@ -319,7 +337,8 @@ lifetime, click interception — is unit-tested in real Chromium under the
 
 - Credentials in extension storage in plaintext; `ws://` only for the local
   dev Prosody — production must be `wss://`.
-- No forms/uploads; one page per tab (no in-extension tab strip); no response
-  caching, so every navigation re-fetches.
+- No file uploads or multipart forms (urlencoded GET/POST work); no streaming
+  render — a page paints only when its body has fully arrived (the bar under
+  the chrome shows the transfer).
 - `web-ext lint` flags Firefox's upcoming data-consent manifest key and the
   (sanitized) `srcdoc` assignment as warnings — both acknowledged.

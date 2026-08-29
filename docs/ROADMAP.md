@@ -1,15 +1,20 @@
 # Roadmap — next possible phases and tasks
 
-Status today (v0.7.0, 2026-08-27): the library implements
+Status today (v0.7.0, 2026-08-27; repo pushed to `ooguz/xmpp-httpx`
+2026-08-29): the library implements
 **all seven XEP-0332 body transports** with client + server, discovery +
 entity caps, SOCKS5 bytestreams, Content-Encoding, a Prosody E2E suite,
 browser-mode CI, and the Firefox/Chromium WebExtension browser
 (`examples/webext/`) — which now renders page CSS, submits forms, caches with
-real 304 revalidation, saves downloads, and shows page titles and favicons.
+real 304 revalidation, saves downloads, shows page titles and favicons, and
+has an *embedded mode* (`?embedded=1`) that lets a host app own the chrome
+and drives its back button through real session-history entries — the mode
+the Firefox Klar fork (`ooguz/klar-httpx`) runs it in as a GeckoView
+built-in.
 Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
 are done, Jingle S5B included; phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
 image, observability, static-site mode, rate limiting); phase 12 is done (the
-Electron shell, with OS-handler and mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
+Electron shell, the Klar fork, and OS-handler/mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 
 ## Phase 7 — Release & ecosystem
@@ -20,9 +25,10 @@ implementations to revive its standards process — be that implementation.
 - [ ] **Publish `xmpp-httpx@0.7.0` to npm** (S) — fully prepared (metadata,
   `prepublishOnly` gate, pack verified, v0.7.0 tagged); owner action:
   `npm login && npm publish` — see [RELEASING.md](../RELEASING.md).
-- [ ] **Git remote + CI activation** (S) — prepared (badges, Pages CI job,
-  repo URLs assume `ooguz/xmpp-httpx`); owner action: `gh repo create` +
-  push — see [RELEASING.md](../RELEASING.md).
+- [~] **Git remote + CI activation** (S) — pushed to `ooguz/xmpp-httpx`
+  (private) 2026-08-29, `main` + `v0.7.0` tag; CI runs on pushes. The one
+  remainder: GitHub Pages (the `api-docs` job's target) is not available on
+  a private repo's free plan — make the repo public or park that job.
 - [x] **API reference site** (M) — typedoc (`npm run docs:api`) verified
   locally; the `api-docs` CI job deploys to GitHub Pages on pushes to main
   once the repo exists.
@@ -139,16 +145,21 @@ Goal: from demo to daily-drivable.
   webfonts served over XMPP actually render. Tested in real Chromium
   (`test/browser/`); reasoning in [browser-extension.md](browser-extension.md)
   §CSS.
-- [ ] **Progressive rendering** (M) — **deliberately deferred**, and it needs
-  a different design than "render HTML as it streams". The pipeline's safety
-  comes from sanitizing a *complete* document (`WHOLE_DOCUMENT` DOMPurify, then
-  one CSSOM pass, then one `srcdoc` assignment); partial markup is exactly
-  where mXSS lives, and re-sanitizing a growing buffer on every chunk is
-  O(n²) plus visible reflow. What is achievable without weakening that: stream
-  the body with byte-progress feedback in the chrome, then render once. That is
-  a UX task, not the streaming-HTML task the item's title implies — worth
-  splitting before either is picked up. Note the cache layer buffers bodies
-  too (`blob()`), so progress reporting has to be plumbed through it.
+- [x] **Progressive rendering → byte-progress feedback** (M) — the item split
+  as promised, and the honest half shipped: streaming *rendering* stays
+  rejected (the pipeline's safety comes from sanitizing a *complete* document
+  — `WHOLE_DOCUMENT` DOMPurify, one CSSOM pass, one `srcdoc` assignment;
+  partial markup is exactly where mXSS lives, and re-sanitizing a growing
+  buffer on every chunk is O(n²) plus visible reflow), but the wait is no
+  longer blind. `src/progress.ts` counts bytes where the network stream is
+  actually consumed (the cache layer's miss path, or the raw POST/bypass
+  read — one of the two per load, decided by the cache state), reports per
+  tab under the same `loadSeq` supersession guard the renders use, and the
+  chrome shows a thin bar (outside the hideable chrome, so embedded
+  mode/Klar keeps it) plus a byte chip; Content-Length, when it survives
+  (deleted on transparent decompression, so a survivor matches the counted
+  bytes), makes the bar determinate. Reasoning in
+  [browser-extension.md](browser-extension.md) §Caching.
 - [x] **Forms** (M) — GET and `application/x-www-form-urlencoded` POST forms
   (`examples/webext/src/forms.ts`). Submission is driven from control clicks
   and Enter-key implicit submission, *not* a `submit` listener: the sandbox has
@@ -173,9 +184,13 @@ Goal: from demo to daily-drivable.
   switching tabs never refetches), per-tab blob/favicon/cache ownership in a
   resources map, and **per-tab back/forward stacks** (`src/tabs.ts`). The cost,
   accepted deliberately: the hash is now a *mirror* of the active tab rather
-  than the source of truth, so the platform's own Back button no longer walks
-  httpx pages — one shared entry list cannot express per-tab history. Deep links
-  still work. Reasoning in [browser-extension.md](browser-extension.md) §Tabs.
+  than the source of truth, so standalone, the platform's own Back button no
+  longer walks httpx pages — one shared entry list cannot express per-tab
+  history. Deep links still work. *Embedded mode* (`?embedded=1`, 2026-08-28)
+  is the exception: the page's own chrome is hidden there, so page-to-page
+  navigations push real session-history entries and the host's back/forward
+  traversals re-enter via `hashchange`. Reasoning in
+  [browser-extension.md](browser-extension.md) §Tabs.
 - [x] **Downloads** (S) — non-renderable content types (and any
   `Content-Disposition: attachment`) → `downloads.download` with a blob URL,
   `<a download>` fallback outside an extension context; filenames from
@@ -294,6 +309,14 @@ mobile) is researched and written down rather than guessed at.
   already done and verified — argv on first launch, `second-instance` for a
   repeat launch, `open-url` for macOS — and the note covers the security
   question a registration raises: any web page can then hand the app a URL.
+- [x] **Android browser — Firefox Klar fork** (L) — `ooguz/klar-httpx`
+  (branch `httpx`): the archived mozilla-mobile/firefox-android monorepo's
+  Klar app navigating `httpx://` URLs, by bundling `examples/webext` as a
+  GeckoView built-in extension and loading its page in embedded mode behind
+  Klar's own toolbar — including the system back gesture walking httpx pages
+  (extension ≥0.2.2). Verified end to end on an API 34 emulator against the
+  demo gateway. Build/architecture notes in the fork's `README-HTTPX.md`;
+  Mozilla trademarks mean rebranding before any distribution.
 - [x] **Mobile feasibility note** (S) —
   [mobile-feasibility.md](mobile-feasibility.md): the library itself needs only
   polyfills (`ReadableStream`, `crypto.subtle`, no `CompressionStream`), `wss://`

@@ -44,6 +44,48 @@
     of leaving two identical adjacent entries and a dead back press.
   - A URL typed while the boot auto-connect was still in flight is no longer
     overridden by the boot hash once the connection comes up.
+- **WebExtension byte progress**: transfers are no longer a blind wait — a
+  thin bar under the chrome plus a byte chip ("1.2 MB of 3.4 MB") show how
+  much of the body has arrived, then the page renders once, as before. This
+  is the honest half of "progressive rendering": the pipeline still sanitizes
+  and paints only a *complete* document (partial markup is where mXSS lives),
+  so the streaming went into feedback, not rendering. Bytes are counted where
+  the network stream is actually consumed — the cache layer's miss path, or
+  the raw POST/bypass read, never both for one load — reported per tab and
+  discarded when a newer load supersedes the reporter. A surviving
+  `Content-Length` makes the bar determinate (the library drops the header
+  whenever it decompresses, so one that survives is in the counted bytes);
+  it is still only a hint, and bytes outgrowing it drop the bar back to
+  indeterminate. The bar sits outside the hideable chrome, so embedded mode
+  (the Klar fork) keeps it — the one loading signal the host app's user gets.
+  Hardening out of adversarially reviewing this change:
+  - Error pages now *supersede* in-flight loads the way a newer load does:
+    before, a slow fetch stayed "fresh" across an error render (an
+    unparseable typed URL, a refused form), kept driving the bar over the
+    error page, and then painted its page over it — leaving the address bar
+    and the viewport disagreeing.
+  - An indeterminate bar no longer renders as a motionless *full* bar in
+    Gecko (with `appearance: none`, `::-moz-progress-bar` is laid out at
+    full width when no value is set — exactly the engine the Klar fork
+    embeds); both engines now hide the fill and slide a shimmer instead.
+  - Forced-colors mode (Windows High Contrast) gets a system-palette bar
+    (`Highlight`/`Canvas` with `forced-color-adjust: none`) — author
+    backgrounds were stripped, leaving no loading signal at all.
+  - Bodies the cache layer already buffered are consumed with
+    `response.blob()` again rather than re-counted — the counting loop
+    copied an already-in-memory body twice for nobody listening.
+- **WebExtension**: a POST answered with 204/205 (and a GET landing on one)
+  now renders an explicit "Nothing to show" receipt with a Back action —
+  before, the empty no-content body replaced the form's page as a blank
+  page. A real browser stays on the page; this model commits the navigation
+  before the status is known, so the receipt is the honest version.
+- **WebExtension fix**: a 304 carrying `Cache-Control: no-store` now
+  *evicts* the cached entry (served once, validated, then gone) instead of
+  re-storing the body the server just revoked — before, the entry could
+  never be purged by revalidation, only by a full 200.
+- **WebExtension fix**: a 204, 205 or 304 the cache layer rebuilt threw —
+  the `Response` constructor refuses a body, even an empty `Blob`, on a
+  null-body status — surfacing as a load error on any 204 a page GETs.
 - **WebExtension fix**: `normalizeUrl` no longer percent-decodes every
   navigated URL — only inputs that arrive wholly encoded are decoded: the
   Firefox protocol-handler `%s` placeholder (`ext+httpx://…`) and the

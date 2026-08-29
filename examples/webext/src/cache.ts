@@ -15,6 +15,8 @@
  * `If-None-Match`/`If-Modified-Since` producing a real 304.
  */
 
+import { bufferBody, type ProgressCallback } from "./progress.js";
+
 const CACHE_PREFIX = "httpx-v1:";
 const KEY_ORIGIN = "https://httpx.invalid/";
 /** Header recording when we stored the entry, for age computation. */
@@ -156,7 +158,10 @@ async function store(
 }
 
 function rebuild(response: Response, body: Blob): Response {
-  return new Response(body, {
+  // A null-body status (204, 205, 304 — 1xx never reaches here) makes the
+  // Response constructor throw for any body, even an empty Blob.
+  const nullBody = [204, 205, 304].includes(response.status);
+  return new Response(nullBody ? null : body, {
     status: response.status,
     statusText: response.statusText,
     headers: withoutBookkeeping(response.headers),
@@ -166,12 +171,14 @@ function rebuild(response: Response, body: Blob): Response {
 /**
  * Fetches `href` through the cache. `reload: true` skips the freshness check
  * (what the reload button does) but still revalidates, so an unchanged page
- * costs one 304 instead of a full body.
+ * costs one 304 instead of a full body. `onProgress` reports byte progress
+ * while a network body is buffered — the miss path is where the user actually
+ * waits; hits and 304s serve a body already on disk and report nothing.
  */
 export async function cachedFetch(
   href: string,
   fetcher: Fetcher,
-  options: { reload?: boolean } = {},
+  options: { reload?: boolean; onProgress?: ProgressCallback } = {},
 ): Promise<CachedResult> {
   const cache = await openCache();
   if (!cache) return { response: await fetcher(), state: "bypass" };
@@ -201,7 +208,14 @@ export async function cachedFetch(
       statusText: "OK",
       headers: withStoredAt(merged, now),
     });
-    await store(cache, href, refreshed, body, now);
+    // The merged headers may have turned uncacheable — a 304 carrying
+    // no-store is the server revoking storage, not just vouching for the
+    // body — so re-storing is gated the same way a fresh 200 is.
+    if (isStorable(refreshed, body.size)) {
+      await store(cache, href, refreshed, body, now);
+    } else {
+      await invalidate(href);
+    }
     return { response: rebuild(refreshed, body), state: "revalidated" };
   }
 
@@ -211,7 +225,7 @@ export async function cachedFetch(
     return { response: full, state: "bypass" };
   }
 
-  const body = await response.blob();
+  const body = await bufferBody(response, options.onProgress);
   if (isStorable(response, body.size)) {
     await store(cache, href, response, body, now);
   } else if (stored) {

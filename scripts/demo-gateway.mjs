@@ -14,6 +14,13 @@ const LOGO_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
 const LOGO_PNG = Uint8Array.from(atob(LOGO_PNG_BASE64), (c) => c.charCodeAt(0));
 const REPORT_BIN = new Uint8Array(64).fill(0x2a);
+// Large enough that it must stream (many stanzas), and typed octet-stream so
+// it is never compressed away — the download whose transfer shows the bar.
+const BIG_BIN = (() => {
+  const bytes = new Uint8Array(256 * 1024);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 31 + 7) & 0xff;
+  return bytes;
+})();
 
 const STYLE = `<style>
   body { max-width: 40rem; font-family: system-ui, sans-serif }
@@ -35,7 +42,8 @@ const PAGES = {
 <p>This page traveled inside XMPP stanzas — no HTTP connection anywhere.</p>
 <p><a href="about.html">About (relative link)</a>
  · <a href="nice%20page.html">Encoded link</a>
- · <a href="/download/report.bin">Download</a></p>
+ · <a href="/download/report.bin">Download</a>
+ · <a href="/download/big.bin">Big download</a></p>
 <img src="img/logo.png" alt="logo">
 <form action="/search" method="get">
   <input name="q" placeholder="search" value="stanza">
@@ -149,6 +157,19 @@ server.handle(async (req) => {
         "content-disposition": 'attachment; filename="httpx-report.bin"',
       },
       body: REPORT_BIN,
+    };
+  }
+
+  if (path === "/download/big.bin") {
+    // The explicit Content-Length is what makes the browser's bar determinate.
+    return {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="httpx-big.bin"',
+        "content-length": String(BIG_BIN.length),
+      },
+      body: BIG_BIN,
     };
   }
 

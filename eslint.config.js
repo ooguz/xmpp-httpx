@@ -46,9 +46,11 @@ export default tseslint.config(
     files: ["scripts/smoke-browser.mjs"],
     languageOptions: {
       globals: {
+        clearInterval: "readonly",
         document: "readonly",
         getComputedStyle: "readonly",
         history: "readonly",
+        setInterval: "readonly",
         window: "readonly",
       },
     },
