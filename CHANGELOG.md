@@ -97,6 +97,26 @@
   `#drawer { display: flex }` rule outweighed the UA's `[hidden]` rule, so
   closing it never actually hid it. An explicit `#drawer[hidden]` rule restores
   the intended behavior.
+- **S5B throughput benchmark** (`test/bench/s5b.bench.ts`, in `npm run bench`):
+  the sipub (XEP-0065) and Jingle (XEP-0260) SOCKS5 paths measured against an
+  IBB baseline, with the S5B bodies crossing a *real* loopback TCP socket (the
+  server self-hosts a direct streamhost, the client dials it) — the
+  measurement the roadmap said the mock pair could not provide. Every S5B
+  round trip proves, inside the measured function (tinybench does not await
+  the async teardown hook, so a throw there cannot fail the case), that it
+  actually opened a negotiated socket — a silent IBB fallback errors the
+  benchmark task instead of publishing IBB numbers under an S5B label.
+  Loopback numbers: S5B delivers ~1.3–2× IBB's throughput at 64 KiB,
+  ~12× at 1 MiB, ~25× at 8 MiB (the shape is the result — the digits move
+  run to run) — despite the IBB baseline never touching a socket at all.
+- **Perf fix: stream senders are linear in body size again.** The IBB and
+  chunkedBase64 senders re-copied the entire buffered remainder once per
+  block whenever a body arrived as one large part — O(body²/blockSize): an
+  8 MiB IBB body did ~8 GiB of copying, measured at 5.5 s per transfer over
+  the in-memory pair and 0.69 s after the fix, now scaling linearly. Both
+  senders cut blocks through a shared `BlockBuffer` (internal) that only
+  views a part that covers the block and coalesces just when the front part
+  cannot. Found by the S5B benchmark's first run.
 
 ## 0.7.0 — 2026-08-27
 

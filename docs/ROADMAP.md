@@ -94,7 +94,7 @@ Goal: close the remaining spec-adjacent gaps.
 Acceptance (met): compressed bodies round-trip with wire-level proof (zero chunk
 stanzas for a 288 KB text body), and SOCKS5 bytestreams exist on both the sipub
 (XEP-0065) and jingle (XEP-0260) paths. The phase 9 throughput benchmark
-comparing them against IBB on Node is unblocked but still not run.
+comparing them against IBB on Node has now run — see Phase 9.
 
 ## Phase 9 — Hardening & performance
 
@@ -109,10 +109,14 @@ Goal: trust the implementation under adversarial and heavy load.
   (`test/integration/adversarial.test.ts`; drove the IBB idle-timeout fix).
 - [x] **Throughput benchmarks** (M) — bytes/sec per transport (inline vs
   chunked vs IBB) over the mock pair; `npm run bench`, tracked in CI as an
-  informational `workflow_dispatch` job. S5B now exists (sipub/XEP-0065, see
-  Phase 8) but isn't in `npm run bench` yet — it needs real TCP sockets, not
-  the mock pair; no Prosody-side benchmark yet either (mock-pair numbers are
-  comparative, not wire-clocked).
+  informational `workflow_dispatch` job. S5B included since 2026-08-30
+  (`test/bench/s5b.bench.ts`): the sipub (XEP-0065) and Jingle (XEP-0260)
+  bodies cross a real loopback TCP socket via a self-hosted streamhost,
+  against an IBB baseline, with a per-round-trip guard proving none
+  silently fell back to IBB — ~1.3–2×/12×/25× IBB at 64 KiB/1 MiB/8 MiB. Its
+  first run caught and fixed an O(body²/blockSize) re-copy in both stream
+  senders (`BlockBuffer` in `src/util/bytes.ts`). Still no Prosody-side
+  benchmark (loopback numbers are comparative, not wire-clocked).
 - [x] **Memory audit** (S) — `scripts/memcheck.mjs` streams 1 MiB and 16 MiB
   IBB bodies and samples live (post-GC) heap; fails if retention scales
   with body size. Verified locally: 0.00x heap ratio for a 16x larger body.
@@ -129,7 +133,8 @@ Goal: trust the implementation under adversarial and heavy load.
   clamped). External eyes on the sandbox reasoning are still worth having.
 
 Acceptance: fuzz + adversarial suites green in CI (done); published
-benchmark numbers (done, mock-pair only); no O(body) memory paths (done);
+benchmark numbers (done — mock-pair transports plus real-TCP S5B; a
+wire-clocked Prosody run remains open); no O(body) memory paths (done);
 security review done (two findings, both fixed) — an outside reviewer on the
 sandbox/rendering reasoning remains the one thing self-review cannot supply.
 

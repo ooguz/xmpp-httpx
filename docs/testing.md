@@ -228,6 +228,25 @@ was a CI-only failure until the alias moved.
   tuning chunk/block sizes. As expected the transports cluster closely; IBB
   and sipub pay a small per-block IQ-round-trip cost that the
   fire-and-forget chunked/message transports avoid.
+- **`test/bench/s5b.bench.ts`** (same `npm run bench` run) is the S5B
+  measurement the mock pair cannot provide: sipub (XEP-0065) and Jingle
+  (XEP-0260) bodies cross a *real* loopback TCP socket — the server
+  self-hosts a direct streamhost, the client dials it — against an IBB
+  baseline at 64 KiB, 1 MiB and 8 MiB. The comparison is deliberately biased
+  against S5B (the IBB baseline's stanzas never touch a socket, the S5B
+  paths pay TCP connect + SOCKS5 handshake + negotiation IQs per request),
+  which makes the result an honest floor: ~1.3–2× IBB at 64 KiB, ~12× at
+  1 MiB, ~25× at 8 MiB on loopback (the shape holds run to run; the exact
+  digits do not). Every S5B round trip asserts *inside the
+  measured function* that it opened a negotiated socket (a throw in
+  tinybench's teardown hook is never awaited, so only there does a failed
+  guard actually error the case), so a silent IBB fallback cannot publish
+  IBB numbers under an S5B label. Still open: a wire-clocked
+  run against Prosody. This benchmark's first run caught a real defect: both
+  stream senders re-copied the buffered remainder once per block —
+  O(body²/blockSize), 5.5 s for an 8 MiB IBB body — fixed by `BlockBuffer`
+  (`src/util/bytes.ts`, pinned by `test/unit/bytes.test.ts`), which brought
+  it to 0.69 s and linear scaling.
 - **`node --expose-gc scripts/memcheck.mjs`** (after `npm run build`) proves
   IBB streaming is **O(block), not O(body)**: it streams 1 MiB and 16 MiB
   bodies while sampling *live* (post-GC) heap, and fails if retention scales
