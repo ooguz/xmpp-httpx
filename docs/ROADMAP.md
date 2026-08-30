@@ -215,10 +215,13 @@ Goal: from demo to daily-drivable.
   store publication, not before; it needs a published extension ID to hand off
   to on Chromium.
 
-The demo site (`test/e2e/demo-site.ts`, served by `scripts/demo-gateway.mjs`)
-now exercises the shipped surface: a `<style>` block with a CSS background
-fetched over XMPP, a favicon, GET and POST forms, and an attachment download —
-covered end-to-end against Prosody in the component-gateway E2E suite.
+The demo site (`test/e2e/demo-site.ts`, served by `scripts/demo-gateway.mjs` —
+kept-in-step twins) now exercises the shipped surface: a `<style>` block with
+a CSS background fetched over XMPP, a favicon, GET and POST forms, an
+attachment download, and the two progress-bar stages — `/download/big.bin`
+(256 KB with Content-Length: the determinate bar) and `/download/slow.bin`
+(trickled, length-less: the indeterminate shimmer) — covered end-to-end
+against Prosody in the component-gateway E2E suite and `npm run smoke`.
 
 Acceptance: **met except signing** — `npm run smoke` drives the built extension
 in real Chromium against the demo gateway over real XMPP and checks exactly
