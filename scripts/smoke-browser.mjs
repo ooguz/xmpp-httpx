@@ -283,6 +283,41 @@ try {
       throw new Error(`byte chip said "${sized.at(-1).chip}"`);
     }
   });
+  await step("a no-length download shows the indeterminate bar", async () => {
+    // /download/slow.bin sends no Content-Length, so the bar must stay
+    // indeterminate (no value attribute) for the whole trickled transfer.
+    await page.evaluate(() => {
+      const bar = document.getElementById("loadProgress");
+      window.__shimSeen = [];
+      const timer = setInterval(() => {
+        if (!bar.hidden) {
+          window.__shimSeen.push(bar.hasAttribute("value") ? bar.value : null);
+        }
+      }, 25);
+      window.__shimStop = () => clearInterval(timer);
+    });
+    const wait = page.waitForEvent("download", { timeout: TIMEOUT });
+    await page.fill("#address", "httpx://web@httpx.localhost/download/slow.bin");
+    await page.press("#address", "Enter");
+    const download = await wait;
+    if (download.suggestedFilename() !== "httpx-slow.bin") {
+      throw new Error(download.suggestedFilename());
+    }
+    await page.waitForFunction(
+      () => document.getElementById("loadProgress").hidden,
+      null,
+      { timeout: TIMEOUT },
+    );
+    const seen = await page.evaluate(() => {
+      window.__shimStop();
+      return window.__shimSeen;
+    });
+    if (seen.length === 0) throw new Error("progress bar never became visible");
+    const determinate = seen.filter((v) => v !== null);
+    if (determinate.length > 0) {
+      throw new Error(`bar went determinate with no total: ${JSON.stringify(determinate.slice(0, 3))}`);
+    }
+  });
   await step("a raw-typed path with a space loads and round-trips", async () => {
     // tab.url keeps the raw space while location.hash serializes it to %20;
     // the chrome sync must compare serialized spellings or it rewrites the

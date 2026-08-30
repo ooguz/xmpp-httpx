@@ -50,7 +50,8 @@ const PAGES: Record<string, { type: string; body: string | Uint8Array }> = {
 <p><a href="about.html">About (relative link)</a> · <a href="/img/logo.png">Logo</a>
  · <a href="nice%20page.html">Encoded link</a>
  · <a href="/download/report.bin">Download</a>
- · <a href="/download/big.bin">Big download</a></p>
+ · <a href="/download/big.bin">Big download</a>
+ · <a href="/download/slow.bin">Slow download</a></p>
 <img src="img/logo.png" alt="logo">
 <form action="/search" method="get">
   <input name="q" placeholder="search" value="stanza">
@@ -175,6 +176,33 @@ export const demoSiteHandler: HttpxHandler = async (req) => {
         "content-length": String(BIG_BIN.length),
       },
       body: BIG_BIN,
+    };
+  }
+
+  if (path === "/download/slow.bin") {
+    // No Content-Length on purpose: the browser's bar has no total, so it
+    // shows its indeterminate shimmer — and the trickle keeps it on screen
+    // long enough to see (24 chunks of 8 KB, 200 ms apart, ~5 s).
+    const chunk = new Uint8Array(8 * 1024).fill(0x73);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (sent === 24) {
+          controller.close();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        controller.enqueue(chunk);
+        sent += 1;
+      },
+    });
+    return {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="httpx-slow.bin"',
+      },
+      body,
     };
   }
 
