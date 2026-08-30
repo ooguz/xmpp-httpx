@@ -15,6 +15,69 @@ export function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
+/**
+ * Accumulates written parts and cuts contiguous blocks off the front without
+ * re-copying the tail. The naive loop — concatenate everything buffered, send
+ * the first block, keep the rest — copies the whole remainder once per block,
+ * which is O(body²/blockSize) when a body arrives as one large part: an 8 MiB
+ * body in 4 KiB blocks re-copies ~8 GiB. Here a front part that covers the
+ * requested block is only ever *viewed* (subarray), and parts are coalesced
+ * just when the front part alone cannot cover one block, so total copying
+ * stays amortized O(bytes pushed).
+ *
+ * Ownership: pushed parts are retained by reference and blocks are returned
+ * as views into them — the pusher must not mutate a part after push(), and
+ * consumers must use a taken block before the next push() can coalesce it.
+ */
+export class BlockBuffer {
+  #parts: Uint8Array[] = [];
+  #bytes = 0;
+
+  /** Bytes currently buffered. */
+  get size(): number {
+    return this.#bytes;
+  }
+
+  push(part: Uint8Array): void {
+    if (part.length === 0) return;
+    this.#parts.push(part);
+    this.#bytes += part.length;
+  }
+
+  /**
+   * Exactly `n` contiguous bytes off the front — a view into the pushed part
+   * whenever it alone covers the block. Callers must check `size >= n` first.
+   */
+  take(n: number): Uint8Array {
+    // The integer check matters: subarray() truncates a fractional n while
+    // `#bytes -= n` would not, and that drift silently drops trailing bytes.
+    if (!Number.isInteger(n) || n <= 0 || this.#bytes < n) {
+      throw new RangeError(`cannot take ${n} bytes from ${this.#bytes} buffered`);
+    }
+    if (this.#parts[0]!.length < n) {
+      this.#parts = [concatBytes(this.#parts)];
+    }
+    const head = this.#parts[0]!;
+    const out = head.subarray(0, n);
+    if (head.length > n) {
+      this.#parts[0] = head.subarray(n);
+    } else {
+      this.#parts.shift();
+    }
+    this.#bytes -= n;
+    return out;
+  }
+
+  /** Everything buffered as one contiguous array; leaves the buffer empty. */
+  drain(): Uint8Array {
+    const out =
+      this.#parts.length === 1 ? this.#parts[0]! : concatBytes(this.#parts);
+    this.#parts = [];
+    this.#bytes = 0;
+    return out;
+  }
+}
+
 export function streamFromBytes(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {

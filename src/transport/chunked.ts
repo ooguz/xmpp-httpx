@@ -7,7 +7,7 @@ import {
 import { HttpxError } from "../errors.js";
 import { bareJid, type XmppSession } from "../session.js";
 import { decodeBase64, encodeBase64 } from "../util/base64.js";
-import { concatBytes, iterateStream } from "../util/bytes.js";
+import { BlockBuffer, iterateStream } from "../util/bytes.js";
 
 /**
  * The chunkedBase64 mechanism (XEP-0332 §6.4): after the IQ carrying
@@ -51,21 +51,14 @@ export class ChunkedSender {
   ): Promise<void> {
     const signal = options?.signal;
     let nr = 0;
-    let pending: Uint8Array[] = [];
-    let pendingBytes = 0;
+    const pending = new BlockBuffer();
 
     // Invariant: at most chunkSize bytes stay buffered, so the final flush is
     // a single chunk — a full buffer is held back in case it turns out last.
     const push = async (part: Uint8Array) => {
-      if (part.length === 0) return;
       pending.push(part);
-      pendingBytes += part.length;
-      while (pendingBytes > this.#chunkSize) {
-        const all = concatBytes(pending);
-        await this.#sendChunk(nr++, false, all.subarray(0, this.#chunkSize));
-        const rest = all.subarray(this.#chunkSize);
-        pending = rest.length > 0 ? [rest] : [];
-        pendingBytes = rest.length;
+      while (pending.size > this.#chunkSize) {
+        await this.#sendChunk(nr++, false, pending.take(this.#chunkSize));
       }
     };
 
@@ -79,7 +72,7 @@ export class ChunkedSender {
     }
     signal?.throwIfAborted();
     // Final chunk; an empty body is a single empty chunk with last='true'.
-    await this.#sendChunk(nr, true, concatBytes(pending));
+    await this.#sendChunk(nr, true, pending.drain());
   }
 
   async #sendChunk(nr: number, last: boolean, bytes: Uint8Array) {

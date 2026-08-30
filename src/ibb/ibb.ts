@@ -16,7 +16,7 @@ import {
   type XmppSession,
 } from "../session.js";
 import { decodeBase64, encodeBase64 } from "../util/base64.js";
-import { concatBytes } from "../util/bytes.js";
+import { BlockBuffer } from "../util/bytes.js";
 
 /**
  * XEP-0047 In-Band Bytestreams, both directions.
@@ -33,6 +33,12 @@ import { concatBytes } from "../util/bytes.js";
 
 export interface IbbOutStream {
   readonly sid: string;
+  /**
+   * Hands the bytes over: a sub-block remainder stays buffered *by reference*
+   * until a later write or close() sends it, so the caller must not mutate
+   * the array after this resolves (the same contract as a WHATWG or Node
+   * stream sink — reusing a scratch buffer between writes corrupts the tail).
+   */
   write(bytes: Uint8Array): Promise<void>;
   /** Flushes any buffered partial block and sends <close/>. */
   close(): Promise<void>;
@@ -150,8 +156,7 @@ export class IbbManager {
     await this.#request(to, from, open);
 
     let seq = 0;
-    let buffered: Uint8Array[] = [];
-    let bufferedBytes = 0;
+    const buffered = new BlockBuffer();
     let closed = false;
     let failed: Error | undefined;
 
@@ -180,14 +185,9 @@ export class IbbManager {
       write: async (bytes: Uint8Array): Promise<void> => {
         ensureUsable();
         buffered.push(bytes);
-        bufferedBytes += bytes.length;
         try {
-          while (bufferedBytes >= blockSize) {
-            const all = concatBytes(buffered);
-            await sendBlock(all.subarray(0, blockSize));
-            const rest = all.subarray(blockSize);
-            buffered = rest.length > 0 ? [rest] : [];
-            bufferedBytes = rest.length;
+          while (buffered.size >= blockSize) {
+            await sendBlock(buffered.take(blockSize));
           }
         } catch (err) {
           failed = fromXmppError(err);
@@ -198,10 +198,8 @@ export class IbbManager {
         ensureUsable();
         closed = true;
         try {
-          if (bufferedBytes > 0) {
-            await sendBlock(concatBytes(buffered));
-            buffered = [];
-            bufferedBytes = 0;
+          if (buffered.size > 0) {
+            await sendBlock(buffered.drain());
           }
           await sendClose();
         } catch (err) {
