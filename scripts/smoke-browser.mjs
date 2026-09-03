@@ -138,9 +138,17 @@ try {
       .evaluate((el) => getComputedStyle(el).backgroundImage);
     if (!image.includes("blob:")) throw new Error(image);
   });
-  await step("httpx image fetched into a blob", async () => {
-    const src = await (await activeFrame()).locator("img[alt=logo]").getAttribute("src");
-    if (!src?.startsWith("blob:")) throw new Error(String(src));
+  await step("httpx image fetched into a blob AND decoded", async () => {
+    // naturalWidth, not just the src: a blob of corrupt bytes still has a
+    // blob: src. The demo logo shipped with a bad IDAT CRC for weeks —
+    // Chromium's lenient decoder forgave it, Gecko refused it ("Image
+    // corrupt or truncated" on the Klar fork) — and this src-only check
+    // never noticed. Decoding is the property the user actually sees.
+    const img = await (await activeFrame())
+      .locator("img[alt=logo]")
+      .evaluate((el) => ({ src: el.getAttribute("src"), naturalWidth: el.naturalWidth }));
+    if (!img.src?.startsWith("blob:")) throw new Error(String(img.src));
+    if (img.naturalWidth === 0) throw new Error("blob src set but the image did not decode");
   });
   await step("favicon is the page's own icon", async () => {
     const href = await page.getAttribute("#favicon", "href");

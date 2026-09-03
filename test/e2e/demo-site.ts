@@ -12,7 +12,7 @@ import { decodeBase64 } from "../../src/util/base64.js";
 
 // 1x1 red PNG.
 export const LOGO_PNG = decodeBase64(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGM4w8DwHwAENAHMMxyLlwAAAABJRU5ErkJggg==",
 );
 
 /** Sent as an attachment, so the browser saves it instead of showing it. */

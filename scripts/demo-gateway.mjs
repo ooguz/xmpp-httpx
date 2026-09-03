@@ -11,7 +11,7 @@ import { component } from "@xmpp/component";
 import { allowAll, HttpxServer } from "../dist/index.js";
 
 const LOGO_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGM4w8DwHwAENAHMMxyLlwAAAABJRU5ErkJggg==";
 const LOGO_PNG = Uint8Array.from(atob(LOGO_PNG_BASE64), (c) => c.charCodeAt(0));
 const REPORT_BIN = new Uint8Array(64).fill(0x2a);
 // Large enough that it must stream (many stanzas), and typed octet-stream so

@@ -109,6 +109,14 @@
   Loopback numbers: S5B delivers ~1.3–2× IBB's throughput at 64 KiB,
   ~12× at 1 MiB, ~25× at 8 MiB (the shape is the result — the digits move
   run to run) — despite the IBB baseline never touching a socket at all.
+- **Demo-site fix: the logo PNG had a corrupt IDAT CRC.** Chromium's
+  lenient decoder forgave it, so every Chromium-based check passed while
+  Gecko (the Klar/Berrak fork) refused it with "Image corrupt or
+  truncated" and showed alt text — misdiagnosed for a while as a
+  GeckoView blob/CSP problem until a desktop-Firefox Playwright probe
+  surfaced the decoder error. The fixture is now a valid 1×1 PNG in both
+  demo twins, and `npm run smoke` asserts `naturalWidth > 0` — that the
+  image actually *decoded* — instead of only checking for a `blob:` src.
 - **Perf fix: stream senders are linear in body size again.** The IBB and
   chunkedBase64 senders re-copied the entire buffered remainder once per
   block whenever a body arrived as one large part — O(body²/blockSize): an
