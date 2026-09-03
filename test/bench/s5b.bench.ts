@@ -85,7 +85,13 @@ function harness(preferred: StreamMechanism[], size: number, s5b: boolean) {
     async roundtrip() {
       roundtrips += 1;
       const resp = await client.request("server@example.org", { resource: "/b" });
-      await bytesFromStream(resp.body!);
+      const received = await bytesFromStream(resp.body!);
+      if (resp.statusCode !== 200 || received.byteLength !== size) {
+        throw new Error(
+          `bench integrity: HTTP ${resp.statusCode}, ${received.byteLength} of ` +
+            `${size} bytes — a truncated body must not count as a (fast) sample`,
+        );
+      }
       // The server opens the negotiated socket before it can write the body,
       // so by the time the body has been read in full the count must match.
       if (s5b && opened !== roundtrips) {
@@ -116,19 +122,32 @@ for (const size of [64 * 1024, 1024 * 1024, 8 * 1024 * 1024]) {
     ];
     for (const [name, preferred, s5b] of cases) {
       let h: ReturnType<typeof harness>;
+      let phase: "warmup" | "run" = "warmup";
       bench(
         name,
         async () => {
-          await h.roundtrip();
+          try {
+            await h.roundtrip();
+          } catch (err) {
+            if (phase === "run") {
+              // Under throws:true a run-phase throw hangs vitest silently
+              // (tinybench rethrows before its error event fires; vitest's
+              // wrapper loses the rejection). Crash the worker instead.
+              console.error(`[bench:s5b] ${name}: ${String(err)}`);
+              process.exit(1);
+            }
+            throw err; // warmup throws surface loudly through vitest
+          }
         },
         {
           time: 500,
-          // Without this, tinybench swallows a thrown error into
+          // Without this, tinybench swallows a *warmup* error into
           // task.result.error: the case just vanishes from the table and the
-          // run exits 0 — the integrity guard would be silent. With it, the
-          // throw propagates and fails the run.
+          // run exits 0 — the integrity guard would be silent. Run-phase
+          // errors never reach it — see the catch above.
           throws: true,
-          setup: () => {
+          setup: (_task, mode) => {
+            phase = mode;
             h = harness(preferred, size, s5b);
           },
           teardown: async () => {

@@ -66,6 +66,7 @@ export default defineConfig({
               test: {
                 name: "e2e",
                 include: ["test/e2e/**/*.e2e.test.ts"],
+                benchmark: { include: ["test/e2e/**/*.prosody.bench.ts"] },
                 globalSetup: "./test/e2e/global-setup.ts",
                 testTimeout: 60_000,
                 hookTimeout: 180_000,

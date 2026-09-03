@@ -115,8 +115,12 @@ Goal: trust the implementation under adversarial and heavy load.
   against an IBB baseline, with a per-round-trip guard proving none
   silently fell back to IBB — ~1.3–2×/12×/25× IBB at 64 KiB/1 MiB/8 MiB. Its
   first run caught and fixed an O(body²/blockSize) re-copy in both stream
-  senders (`BlockBuffer` in `src/util/bytes.ts`). Still no Prosody-side
-  benchmark (loopback numbers are comparative, not wire-clocked).
+  senders (`BlockBuffer` in `src/util/bytes.ts`). The Prosody-side run
+  landed 2026-09-03: `npm run bench:prosody`
+  (`test/e2e/transports.prosody.bench.ts`) wire-clocks client↔component
+  through the Dockerized Prosody — S5B is nearly size-independent while
+  the relayed transports scale with size (8 MiB: sipub ~40× IBB, ~19×
+  chunkedBase64; details in [testing.md](testing.md) §Benchmarks).
 - [x] **Memory audit** (S) — `scripts/memcheck.mjs` streams 1 MiB and 16 MiB
   IBB bodies and samples live (post-GC) heap; fails if retention scales
   with body size. Verified locally: 0.00x heap ratio for a 16x larger body.
@@ -133,8 +137,8 @@ Goal: trust the implementation under adversarial and heavy load.
   clamped). External eyes on the sandbox reasoning are still worth having.
 
 Acceptance: fuzz + adversarial suites green in CI (done); published
-benchmark numbers (done — mock-pair transports plus real-TCP S5B; a
-wire-clocked Prosody run remains open); no O(body) memory paths (done);
+benchmark numbers (done — mock-pair transports, real-TCP S5B, and the
+wire-clocked Prosody run); no O(body) memory paths (done);
 security review done (two findings, both fixed) — an outside reviewer on the
 sandbox/rendering reasoning remains the one thing self-review cannot supply.
 

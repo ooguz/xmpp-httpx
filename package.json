@@ -57,6 +57,7 @@
     "test:e2e": "E2E=1 vitest run --project e2e",
     "test:watch": "vitest --project node",
     "bench": "vitest bench --project node --run",
+    "bench:prosody": "E2E=1 vitest bench --project e2e --run",
     "smoke": "node scripts/smoke-browser.mjs",
     "demo": "node scripts/demo.mjs",
     "docs:api": "typedoc",

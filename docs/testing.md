@@ -241,12 +241,27 @@ was a CI-only failure until the alias moved.
   measured function* that it opened a negotiated socket (a throw in
   tinybench's teardown hook is never awaited, so only there does a failed
   guard actually error the case), so a silent IBB fallback cannot publish
-  IBB numbers under an S5B label. Still open: a wire-clocked
-  run against Prosody. This benchmark's first run caught a real defect: both
+  IBB numbers under an S5B label. The wire-clocked run against Prosody is
+  the next bullet. This benchmark's first run caught a real defect: both
   stream senders re-copied the buffered remainder once per block —
   O(body²/blockSize), 5.5 s for an 8 MiB IBB body — fixed by `BlockBuffer`
   (`src/util/bytes.ts`, pinned by `test/unit/bytes.test.ts`), which brought
   it to 0.69 s and linear scaling.
+- **`npm run bench:prosody`** (vitest bench, `test/e2e/transports.prosody.bench.ts`)
+  is the wire-clocked run: an `@xmpp/client` user fetching from an
+  `@xmpp/component` gateway through a real Dockerized Prosody (the e2e
+  globalSetup owns the container and takes it down afterwards — `npm run
+  demo` brings it back; anything else holding the component domain, like a
+  running demo gateway, must be stopped first). The wire changes the story
+  the mock pair cannot tell: S5B is nearly size-independent (~0.1 s at
+  64 KiB and at 8 MiB alike — negotiation cost; the body bypasses Prosody
+  over direct TCP, which is XEP-0065's point), while the server-relayed
+  transports scale with size — at 8 MiB, sipub+S5B measured ~40× IBB and
+  ~19× chunkedBase64, and IBB itself runs ~5× slower than its mock-pair
+  number (a real client↔server↔component round trip per 4 KiB block).
+  chunkedBase64 still wins at 64 KiB, where S5B's setup dominates. Each
+  S5B round trip asserts in-function that it opened a negotiated socket
+  (`throws: true`), like the loopback bench.
 - **`node --expose-gc scripts/memcheck.mjs`** (after `npm run build`) proves
   IBB streaming is **O(block), not O(body)**: it streams 1 MiB and 16 MiB
   bodies while sampling *live* (post-GC) heap, and fails if retention scales

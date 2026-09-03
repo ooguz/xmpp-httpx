@@ -109,6 +109,19 @@
   Loopback numbers: S5B delivers ~1.3–2× IBB's throughput at 64 KiB,
   ~12× at 1 MiB, ~25× at 8 MiB (the shape is the result — the digits move
   run to run) — despite the IBB baseline never touching a socket at all.
+- **Wire-clocked benchmark over a real Prosody** (`npm run bench:prosody`,
+  `test/e2e/transports.prosody.bench.ts`): an `@xmpp/client` user fetches
+  from an `@xmpp/component` gateway with every stanza crossing the
+  Dockerized server — the run the loopback benches could not provide. The
+  wire's verdict: S5B is nearly size-independent (~0.1 s from 64 KiB to
+  8 MiB — negotiation cost only, the body bypasses the server over direct
+  TCP), while relayed transports scale with size; at 8 MiB sipub+S5B
+  measured ~40× IBB and ~19× chunkedBase64, and IBB through the server is
+  ~5× its mock-pair time (one client↔server↔component round trip per
+  4 KiB block). chunkedBase64 still wins small bodies. The same
+  no-silent-IBB integrity guard as the loopback bench, plus mode-aware
+  bench hooks so connections are established during warmup and every
+  measured sample rides a warm connection.
 - **Demo-site fix: the logo PNG had a corrupt IDAT CRC.** Chromium's
   lenient decoder forgave it, so every Chromium-based check passed while
   Gecko (the Klar/Berrak fork) refused it with "Image corrupt or
