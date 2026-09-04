@@ -134,7 +134,10 @@ Goal: trust the implementation under adversarial and heavy load.
   execution path into the iframe, no rule/markup injection through CSSOM
   serialization, no traversal through `Content-Disposition`, no forged
   freshness (`x-httpx-stored-at` is always overwritten locally, `Age` is
-  clamped). External eyes on the sandbox reasoning are still worth having.
+  clamped). External eyes on the sandbox reasoning are still worth having —
+  the reviewer briefing is ready:
+  [security-review-dossier.md](security-review-dossier.md) (threat model,
+  ranked attack requests, prior findings, accepted risks).
 
 Acceptance: fuzz + adversarial suites green in CI (done); published
 benchmark numbers (done — mock-pair transports, real-TCP S5B, and the
