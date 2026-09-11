@@ -1,6 +1,6 @@
 # Roadmap — next possible phases and tasks
 
-Status today (v0.7.0, 2026-08-27; repo pushed to `ooguz/xmpp-httpx`
+Status today (v0.8.0, 2026-09-12; repo pushed to `ooguz/xmpp-httpx`
 2026-08-29): the library implements
 **all seven XEP-0332 body transports** with client + server, discovery +
 entity caps, SOCKS5 bytestreams, Content-Encoding, a Prosody E2E suite,
@@ -22,8 +22,8 @@ Electron shell, the Klar fork, and OS-handler/mobile notes). Effort sizing: **S*
 Goal: make the library consumable and visible; XEP-0332 explicitly asks for
 implementations to revive its standards process — be that implementation.
 
-- [ ] **Publish `xmpp-httpx@0.7.0` to npm** (S) — fully prepared (metadata,
-  `prepublishOnly` gate, pack verified, v0.7.0 tagged); owner action:
+- [ ] **Publish `xmpp-httpx@0.8.0` to npm** (S) — fully prepared (metadata,
+  `prepublishOnly` gate, pack verified, v0.8.0 tagged); owner action:
   `npm login && npm publish` — see [RELEASING.md](../RELEASING.md).
 - [~] **Git remote + CI activation** (S) — pushed to `ooguz/xmpp-httpx`
   (private) 2026-08-29, `main` + `v0.7.0` tag; CI runs on pushes. The one

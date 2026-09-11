@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-09-12
 
 - **WebExtension embedded mode**: `browser.html?embedded=1` hides the
   extension's own tab strip and URL bar, for a host app that provides its own
