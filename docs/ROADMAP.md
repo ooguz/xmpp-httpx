@@ -14,7 +14,7 @@ built-in.
 Phases 1–6 and 10 are done; 7 is owner-blocked on npm/AMO credentials; 8 and 9
 are done, Jingle S5B included; phase 11 is done (`xmpp-httpx-gateway`: CLI, Docker
 image, observability, static-site mode, rate limiting); phase 12 is done (the
-Electron shell, the Klar fork, and OS-handler/mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
+Electron shell, the Klar fork, the Dillo plugin, and OS-handler/mobile notes). Effort sizing: **S** ≤ half a day, **M** ≈ 1–3 days,
 **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 
 ## Phase 7 — Release & ecosystem
@@ -339,6 +339,18 @@ mobile) is researched and written down rather than guessed at.
   rendering — a real mobile browser means `WKURLSchemeHandler` on iOS and
   `shouldInterceptRequest` on Android, i.e. native work per platform. Nothing in
   the library needs to change, which is the useful conclusion.
+- [x] **Dillo plugin** (S, 2026-09-12) — `examples/dillo/`: `httpx://` as a
+  Dillo *server dpi*. Dillo routes every scheme it lacks to a plugin named
+  `proto.<scheme>`, dpid starts ours once with the listening socket on fd 0,
+  and one XMPP session serves every page and image after that. Dillo renders
+  the page itself and has no JavaScript, so the extension's whole
+  sanitizing layer has no counterpart — the plugin is dpip tags in, an HTTP
+  response out (`src/dpip.ts`, `src/serve.ts`, fetch injected). Framing
+  tested over the mock pair (`test/integration-node/dillo-dpi.test.ts`);
+  `npm run smoke:dillo` runs a real dpid and real Dillo under Xvfb against
+  the demo gateway and keeps the screenshot. Limits are Dillo's: no POST
+  (plugins receive only the URL), no revalidation. Reasoning in
+  [dillo-plugin.md](dillo-plugin.md).
 
 ## Cross-cutting quick wins (any time)
 

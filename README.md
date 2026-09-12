@@ -19,11 +19,13 @@ XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implemen
 | [docs/testing.md](docs/testing.md) | The three vitest projects, mock-session harness, Prosody E2E, CI |
 | [docs/browser-extension.md](docs/browser-extension.md) | WebExtension architecture: connection placement, rendering pipeline, tabs, manifest strategy |
 | [docs/electron-shell.md](docs/electron-shell.md) | The desktop shell: `httpx://` as a scheme Chromium fetches, and why that changes the design |
+| [docs/dillo-plugin.md](docs/dillo-plugin.md) | The Dillo plugin: `httpx://` as a dpi, and why Dillo is the easiest host of the three |
 | [docs/gateway-cli.md](docs/gateway-cli.md) | `xmpp-httpx-gateway`: put an existing HTTP origin on XMPP, by hand or in Docker |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Next phases and tasks (release, hardening, extension v2, gateway product) |
 | [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | Implementation-experience write-up for the XSF standards process |
 | [docs/interop.md](docs/interop.md) | Interoperability matrix — tested servers, runtimes, peer implementations |
 | [examples/webext/README.md](examples/webext/README.md) | Build/run guide for the browser extension |
+| [examples/dillo/README.md](examples/dillo/README.md) | Install guide for the Dillo plugin |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## What's implemented
@@ -176,6 +178,23 @@ Page scripts are off by default (a CSP the protocol handler imposes over the
 server's), content lives in sandboxed views with no preload, and account JIDs are
 encoded into the host because a `Request` URL cannot carry credentials. See
 [docs/electron-shell.md](docs/electron-shell.md).
+
+## The Dillo plugin
+
+[`examples/dillo/`](examples/dillo/) teaches [Dillo](https://dillo-browser.github.io/)
+the scheme through its plugin interface: a *server dpi* that dpid starts on the
+first `httpx://` request and that keeps one XMPP session signed in across page
+loads. Dillo fetches a page's images through the same plugin and renders
+everything itself — it has no JavaScript engine, so none of the extension's
+sanitizing exists here; the plugin is a protocol mapping and nothing more.
+
+```sh
+cd examples/dillo && npm install && npm run install:dillo
+# edit ~/.dillo/httpx.json, then open httpx://… in Dillo
+```
+
+Verified against a real dpid and Dillo 3.0.5 under Xvfb (`npm run smoke:dillo`).
+See [docs/dillo-plugin.md](docs/dillo-plugin.md).
 
 ## Roadmap
 

@@ -1,0 +1,23 @@
+{
+  "name": "httpx-dillo-dpi",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dillo plugin (dpi) that browses httpx:// URLs over XMPP (XEP-0332)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build:lib": "npm --prefix ../.. run build",
+    "build": "npm run build:lib && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "install:dillo": "npm run build && sh install.sh",
+    "uninstall:dillo": "sh install.sh --uninstall"
+  },
+  "dependencies": {
+    "@xmpp/client": "^0.14.0",
+    "xmpp-httpx": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3"
+  }
+}

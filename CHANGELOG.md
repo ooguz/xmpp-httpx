@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Dillo plugin** (`examples/dillo/`): `httpx://` in Dillo through its plugin
+  interface. A *server dpi* — dpid starts it once on the first request with
+  the listening socket on fd 0, and one XMPP session stays signed in across
+  page loads, so a page and its images cost one IQ round-trip each rather
+  than a connection. The dpip framing (`buildTag`/`parseTag`/`TagBuffer`)
+  and the per-connection choreography (`auth` → `open_url` →
+  `start_send_page` + an HTTP response; `DpiBye` → exit) are tested over the
+  in-memory session pair; `npm run smoke:dillo` drives a real dpid and a real
+  Dillo under Xvfb against the demo gateway. `install.sh` writes the launcher
+  (absolute `node` path baked in — dpid inherits Dillo's PATH), the `dpidrc`
+  route and an example `~/.dillo/httpx.json`. Failures render as pages with
+  the status the error implies and a hint; a wrong shared secret closes the
+  connection without a byte. See [docs/dillo-plugin.md](docs/dillo-plugin.md).
+
 ## 0.8.0 — 2026-09-12
 
 - **WebExtension embedded mode**: `browser.html?embedded=1` hides the

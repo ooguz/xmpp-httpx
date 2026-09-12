@@ -1,0 +1,7 @@
+{
+  "jid": "alice@localhost",
+  "password": "e2e-alice",
+  "service": "ws://localhost:15280/xmpp-websocket",
+  "resource": "dillo",
+  "timeoutMs": 30000
+}

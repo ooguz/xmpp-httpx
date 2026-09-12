@@ -299,6 +299,24 @@ Not in CI: no job combines Docker and Playwright today. It is the fastest way to
 sanity-check the extension by hand after touching the render or navigation
 paths.
 
+## Dillo smoke test (`npm run smoke:dillo`)
+
+`scripts/smoke-dillo.mjs` is the Dillo plugin's real-world twin of the vitest
+suite in `test/integration-node/dillo-dpi.test.ts` (which drives the dpip
+framing over the in-memory session pair). It installs the built plugin into a
+throwaway `$HOME`, starts a **real dpid**, and speaks to it exactly as Dillo
+does — `check_server` for `proto.httpx`, connect to the port dpid answers
+with, `auth`, `open_url` — against `scripts/demo-gateway.mjs` over the E2E
+Prosody. That covers what only dpid can: the `dpidrc` line routing the scheme,
+the launcher exec'ing under dpid's environment, and the plugin inheriting the
+listening socket on fd 0. Where `dillo` and `xvfb-run` exist it then launches
+Dillo itself under Xvfb, asserts from the plugin's log that Dillo requested the
+page and then its image on its own, and writes
+`examples/dillo/dist/smoke-dillo.png`. Prereqs: `npm run demo` (Prosody +
+alice), and `npm --prefix examples/dillo install && npm --prefix examples/dillo
+run build`. Not in CI, like the browser smoke test: it needs Docker and a
+Dillo install.
+
 ## Manual demo path
 
 `scripts/demo-gateway.mjs` connects to the E2E Prosody's component and

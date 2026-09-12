@@ -152,13 +152,25 @@ const [clientSession, serverSession] = createSessionPair("alice@example.org/pc",
 
 [`examples/webext/`](examples/webext/) dizini, bu kitaplıkla `httpx://` adreslerinde gezinen, **Firefox ve Chromium için çalışan bir tarayıcı eklentisidir**: her sekmenin kendi geçmişi olan sekme çubuğu, adres çubuğu, geçmiş/yer imleri çekmecesi, omnibox anahtar sözcüğü (`httpx server@example.org/page` ⏎), Firefox'ta tıklanabilir `ext+httpx://` bağlantıları ve arındırılmış bir işleme hattı (DOMPurify + CSSOM tabanlı CSS arındırıcı → blob adresli alt kaynaklar → betik çalıştırmayan, yalıtılmış iframe); ayrıca formlar, indirmeler, sayfa başlıkları/simgeleri ve gerçek 304 doğrulaması yapan bir HTTP önbelleği. Derleme/çalıştırma yönergeleri için eklentinin kendi README dosyasına, gezilecek bir örnek site için `scripts/demo-gateway.mjs`'ye, tüm bunları gerçek Chromium'da sınamak için `npm run smoke` komutuna bakın.
 
+## Masaüstü kabuğu ve Dillo eklentisi
+
+[`examples/electron/`](examples/electron/), `protocol.handle("httpx", …)` ile `httpx://` şemasını Chromium'un kendisinin getirdiği bir şema yapar: adres çubuğu gerçektir, alt kaynaklar, formlar, geçmiş ve indirmeler http'de olduğu gibi çalışır. Ayrıntılar: [docs/electron-shell.md](docs/electron-shell.md).
+
+[`examples/dillo/`](examples/dillo/), şemayı [Dillo](https://dillo-browser.github.io/) tarayıcısına eklenti arayüzü (dpi) üzerinden öğretir: dpid'nin ilk `httpx://` isteğinde başlattığı ve sayfalar arasında tek bir XMPP oturumunu açık tutan bir *sunucu dpi*. Dillo sayfanın görsellerini de aynı eklenti üzerinden getirir ve her şeyi kendisi çizer; JavaScript motoru olmadığı için eklentideki arındırma katmanının burada karşılığı yoktur.
+
+```sh
+cd examples/dillo && npm install && npm run install:dillo
+# ~/.dillo/httpx.json dosyasını düzenleyin, sonra Dillo'da httpx://… açın
+```
+
+Gerçek dpid ve Xvfb altında Dillo 3.0.5 ile doğrulandı (`npm run smoke:dillo`). Bkz. [docs/dillo-plugin.md](docs/dillo-plugin.md).
+
 ## Yol haritası
 
-Şimdiye dek tamamlananlar: yedi taşıma yönteminin tümüyle protokol, tarayıcı eklentisi ve geçit (komut satırı aracı, Docker imajı, ölçümler, dizin sunumu, hız sınırlama). Sıradakiler:
+Şimdiye dek tamamlananlar: yedi taşıma yönteminin tümüyle protokol (Jingle S5B dahil), tarayıcı eklentisi, geçit (komut satırı aracı, Docker imajı, ölçümler, dizin sunumu, hız sınırlama), Electron kabuğu, Android için Klar çatalı ve Dillo eklentisi. Sıradakiler:
 
-- Eklenti sayfası yerine gerçek bir `httpx://` adres çubuğu için bir Electron kabuğu
-- Jingle S5B (XEP-0260) taşıma adayı uzlaşımı
-- npm ve eklenti mağazalarına yayımlama
+- npm ve eklenti mağazalarına yayımlama (sahibin kimlik bilgilerini bekliyor)
+- İşleme hattı için harici güvenlik incelemesi
 
 Tamamlananlar da dahil tüm ayrıntılar: [docs/ROADMAP.md](docs/ROADMAP.md).
 
