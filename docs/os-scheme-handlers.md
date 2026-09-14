@@ -1,7 +1,7 @@
 # Registering `httpx:` with the operating system
 
 The desktop shell already accepts a URL as an argument and routes it into the
-running instance — that is the hard half, and it is done
+running instance. That is the hard half, and it is done
 ([electron-shell.md](electron-shell.md)). What remains is telling the OS that
 `httpx:` belongs to it. This note records what each platform needs, and what is
 deliberately not built yet.
@@ -15,11 +15,11 @@ electron . httpx://web.example.org/other    # while running: opens a tab in it
 
 Three paths feed one function:
 
-- **argv on first launch** — `httpxUrlFromArgv(process.argv)`.
-- **`second-instance`** — Linux and Windows deliver a repeat launch here, which
+- argv on first launch: `httpxUrlFromArgv(process.argv)`.
+- `second-instance`: Linux and Windows deliver a repeat launch here, which
   is why the shell takes a single-instance lock. Verified with a real double
   launch.
-- **`open-url`** — macOS delivers handler URLs this way instead of in argv.
+- `open-url`: macOS delivers handler URLs this way instead of in argv.
 
 Electron also offers `app.setAsDefaultProtocolClient("httpx")`, which writes the
 registration at runtime. It is *not* called today: doing it from a source
@@ -70,7 +70,7 @@ development.
 
 ## macOS
 
-Declarative, in the app bundle's `Info.plist` — nothing at runtime:
+Declarative, in the app bundle's `Info.plist`; nothing at runtime:
 
 ```xml
 <key>CFBundleURLTypes</key>
@@ -85,7 +85,7 @@ through `open-url`, which the shell already handles.
 
 ## Why this is not wired up yet
 
-All three want a **packaged application**, and packaging is the open item: an
+All three want a packaged application, and packaging is the open item: an
 unpackaged `npm start` has no stable path (Linux, Windows) and no bundle
 (macOS). The sequence, when someone picks it up:
 
@@ -99,16 +99,16 @@ unpackaged `npm start` has no stable path (Linux, Windows) and no bundle
 
 ## The security question packaging raises
 
-A registered scheme means **any web page can hand your desktop app a URL** —
+A registered scheme means any web page can hand your desktop app a URL:
 `<a href="httpx://…">` in a hostile page, and the OS launches the shell. The
 shell's defences already assume hostile input (the CSP, the sandboxed content
 views, no Node in page renderers), and `httpxUrlFromArgv` only accepts strings
 starting with `httpx://`, but two things deserve attention before shipping a
 registration:
 
-- **Argument injection.** Only the URL is taken from argv, and only if it parses;
-  nothing from a URL reaches a shell command. Worth keeping true — never pass a
+- Argument injection. Only the URL is taken from argv, and only if it parses;
+  nothing from a URL reaches a shell command. Worth keeping true: never pass a
   handler URL to anything that spawns a process.
-- **Silent launch.** Opening an app is itself a signal to an attacker (it proves
+- Silent launch. Opening an app is itself a signal to an attacker (it proves
   the app is installed). Chromium's and Firefox's first-use prompts mitigate
   this, and nothing on our side should bypass them.

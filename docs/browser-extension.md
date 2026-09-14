@@ -1,4 +1,4 @@
-# The httpx browser — WebExtension architecture
+# The httpx browser: WebExtension architecture
 
 `examples/webext/` is the project's end goal made real: a browser for
 `httpx://user@domain/path` URLs, shipped as one Manifest V3 codebase with
@@ -8,17 +8,17 @@ architecture and the reasoning; the hands-on build/run guide is in
 
 ## The one decision that shapes everything
 
-**The XMPP connection lives in the extension's tab page (`browser.html`),
-not in the background script.** MV3 backgrounds are ephemeral: Chrome runs
+The XMPP connection lives in the extension's tab page (`browser.html`),
+not in the background script. MV3 backgrounds are ephemeral: Chrome runs
 a service worker with a ~30 s idle timeout (WebSocket traffic extends it,
 but an idle XMPP connection would need keep-alive hacks), and Firefox runs
-an event page instead — two different lifetime models. Putting the
+an event page instead, which is a different lifetime model. Putting the
 connection in the page makes both problems vanish: the connection exists
 exactly as long as the user is browsing httpx content, per tab, with normal
 page lifetime semantics. The background script
 (`public/background.js`, a plain no-import script that works as both a
 Chrome SW and a Firefox event page) is a stateless router: omnibox and
-protocol-handler events → open/focus `browser.html#<url>`.
+protocol-handler events open or focus `browser.html#<url>`.
 
 ## Component map
 
@@ -44,28 +44,29 @@ protocol-handler events → open/focus `browser.html#<url>`.
 
 ### Tabs, and what they cost the hash
 
-The single-tab browser was **hash-based**: the current URL lived in
+The single-tab browser was hash-based: the current URL lived in
 `browser.html#httpx://…` and the platform's own history gave back/forward for
-free. Tabs make that untenable — one shared entry list cannot represent "each
-tab has its own back stack", so Back in tab B would walk into pages opened in
-tab A. So `src/tabs.ts` owns a per-tab stack, the in-page back/forward buttons
-drive it, and **the hash becomes a mirror** of the active tab's URL, written
-with `replaceState` (which fires no `hashchange`, so it cannot loop). Deep links
-still work: an incoming `#httpx://…` — from the omnibox, a `protocol_handlers`
-link, or a hand-edited hash — loads into the active tab.
+free. Tabs make that untenable, because one shared entry list cannot represent
+"each tab has its own back stack", so Back in tab B would walk into pages
+opened in tab A. So `src/tabs.ts` owns a per-tab stack, the in-page
+back/forward buttons drive it, and the hash becomes a mirror of the active
+tab's URL, written with `replaceState` (which fires no `hashchange`, so it
+cannot loop). Deep links still work: an incoming `#httpx://…` (from the
+omnibox, a `protocol_handlers` link, or a hand-edited hash) loads into the
+active tab.
 
 The trade is deliberate: the *browser's* Back button (Alt+Left) no longer walks
 httpx pages, because those entries no longer exist. The in-page buttons do, and
-they now disable themselves at the ends of each tab's stack.
+they disable themselves at the ends of each tab's stack.
 
-Each tab keeps **its own iframe**, alive for the tab's lifetime, with only the
-active one visible. Switching tabs is therefore free — no refetch, no re-render,
-scroll position preserved. Two consequences worth knowing:
+Each tab keeps its own iframe, alive for the tab's lifetime, with only the
+active one visible. Switching tabs is therefore free: nothing is refetched or
+re-rendered, and scroll position is preserved. Two consequences worth knowing:
 
 - Hidden iframes still load their `srcdoc`, which is what lets a load complete
-  in a background tab (pinned by a test in `test/browser/render.test.ts` —
-  the whole design would silently hang otherwise).
-- Closing a tab **mid-load** cannot detach its iframe: a removed iframe never
+  in a background tab. A test in `test/browser/render.test.ts` pins this,
+  since the whole design would silently hang otherwise.
+- Closing a tab mid-load cannot detach its iframe: a removed iframe never
   fires `load`, so the pending render would never settle and its blob URLs would
   never be revoked. The tab is marked for discard instead and dropped when the
   load finishes.
@@ -80,10 +81,10 @@ user is looking at another tab updates its own tab only.
 A native `httpx://` scheme in the URL bar is impossible in both browsers.
 The layered UX, most-portable first:
 
-1. **Extension-page address bar** — the primary UX, identical everywhere.
-2. **Omnibox keyword** (`httpx server@example.org/page` ⏎) — the real
+1. The extension-page address bar is the primary UX, identical everywhere.
+2. The omnibox keyword (`httpx server@example.org/page` ⏎) is the real
    address-bar entry point, supported by both browsers.
-3. **`protocol_handlers` (Firefox only)** — clickable `ext+httpx://…` links
+3. `protocol_handlers`, Firefox only: clickable `ext+httpx://…` links
    anywhere in Firefox route to `/browser.html#%s`. Chromium has no
    equivalent manifest key; `navigator.registerProtocolHandler("web+httpx")`
    from extension pages is unreliable there and deliberately skipped.
@@ -115,10 +116,10 @@ httpxFetch(url) → DOMPurify.sanitize        (WHOLE_DOCUMENT; FORBID: script,
 
 Security reasoning, layer by layer:
 
-- **No `allow-scripts`** on the sandbox: nothing in the fetched document can
+- No `allow-scripts` on the sandbox: nothing in the fetched document can
   execute. `allow-same-origin` alone is safe when scripts can't run, and it
   is what lets the parent page reach `contentDocument` to intercept link
-  clicks — no code is ever injected into the untrusted document.
+  clicks. No code is ever injected into the untrusted document.
 - The extension page's CSP (`script-src 'self'`) is inherited by `srcdoc`
   as a second layer against inline script.
 - `blob:` image URLs are minted by the parent and revoked on every
@@ -127,35 +128,35 @@ Security reasoning, layer by layer:
 ### CSS (`src/sanitize-css.ts`)
 
 Page CSS is allowed, but DOMPurify does not parse CSS, so it is re-sanitized
-separately — on **CSSOM** (`new CSSStyleSheet().replaceSync(css)`) rather than
+separately, on CSSOM (`new CSSStyleSheet().replaceSync(css)`) rather than with
 a bundled CSS parser, so the browser's own parser normalizes hostile input and
 constructed sheets refuse `@import` by spec.
 
-- **Allow-list on the way out.** Only style, `@font-face`, `@keyframes`,
+- Allow-list on the way out. Only style, `@font-face`, `@keyframes`,
   `@media` and `@supports` rules are re-serialized; everything else
   (`@namespace`, `@page`, `@counter-style`, anything unknown) is simply not
   emitted. Output is built from kept rules instead of calling `deleteRule`
   because CSSOM *refuses* to delete an `@namespace` rule while other rules
-  exist — an unremovable rule must never become a kept rule.
-- **Every `url()` goes through a resolver.** References are resolved against
+  exist, and an unremovable rule must never become a kept rule.
+- Every `url()` goes through a resolver. References are resolved against
   the page URL, then admitted only for `httpx:`/`https:`/`data:`/`blob:`;
   anything else (including `javascript:`) drops the whole declaration. That
   is deliberately the same trust set the pipeline already applies to `<img>`.
-- **httpx references are fetched, not passed through** — nothing inside the
-  scriptless iframe can speak XMPP, so a surviving `httpx:` URL would just be
-  a broken image. Hence the two passes: pass 1 discovers them, pass 2
-  substitutes the parent-minted `blob:` URL. Which is why the sanitizer is
-  idempotent: running it over its own output changes nothing but resolver
-  substitutions.
-- `expression()`, `behavior`, `-moz-binding` are dropped explicitly — dead
-  vectors in modern engines, cheap to keep refusing.
+- httpx references are fetched by the parent rather than passed through,
+  since nothing inside the scriptless iframe can speak XMPP and a surviving
+  `httpx:` URL would just be a broken image. Hence the two passes: pass 1
+  discovers them, pass 2 substitutes the parent-minted `blob:` URL. That is
+  also why the sanitizer is idempotent: running it over its own output
+  changes nothing but resolver substitutions.
+- `expression()`, `behavior`, `-moz-binding` are dropped explicitly; they are
+  dead vectors in modern engines and cheap to keep refusing.
 - A CSS *string value* may contain `</style`, which CSSOM serializes with the
   `<` unescaped; re-serializing the document into `srcdoc` would then close
   the raw-text element early and inject real markup. The serializer re-escapes
   it as `\3c /style`. (A literal `</style>` in the source HTML is a non-issue:
   the HTML parser closes the element before the sanitizer ever sees it.)
 - Input is capped (512 KiB per block) to bound parser work, and the injected
-  default style is **prepended** so page CSS wins on equal specificity.
+  default style is prepended so page CSS wins on equal specificity.
 
 Residual risk, accepted: CSS can hit third-party `https:` origins (fonts,
 background images), which pings that origin on page load. This is exactly what
@@ -164,48 +165,48 @@ zero third-party traffic should restrict the resolver to `httpx:` only.
 
 ### Page metadata and downloads
 
-- **Title and favicon** come from `src/page-meta.ts`, which parses the *raw*
-  response before DOMPurify — sanitization removes `<link>`, taking any icon
-  reference with it. Parsing hostile HTML there is inert (`DOMParser` executes
-  no scripts and fetches no subresources) and everything extracted is used as
-  text or re-resolved as a URL, never as markup. The title is trimmed and
-  capped; the last declared icon wins.
+- Title and favicon come from `src/page-meta.ts`, which parses the *raw*
+  response before DOMPurify runs, because sanitization removes `<link>` and
+  takes any icon reference with it. Parsing hostile HTML there is inert
+  (`DOMParser` executes no scripts and fetches no subresources) and everything
+  extracted is used as text or re-resolved as a URL, never as markup. The
+  title is trimmed and capped; the last declared icon wins.
 
-  Icons are accepted **only** over `httpx:` (fetched through the session into a
+  Icons are accepted only over `httpx:` (fetched through the session into a
   `blob:` URL, revoked on navigation). The favicon is the one page-supplied
   resource that lands on the *extension* page rather than inside the sandboxed
-  iframe, and the extension page otherwise loads nothing remote — honoring an
+  iframe, and the extension page otherwise loads nothing remote. Honoring an
   `https:` icon would let any visited page make the privileged origin issue a
   cross-origin request with third-party cookies attached.
-- **Non-renderable responses are saved, not shown**: anything that is not
-  text, an image, or structured text (`+json`/`+xml`), and anything sent with
-  `Content-Disposition: attachment`, goes to `downloads.download` (permission
-  `downloads`; falls back to a synthetic `<a download>` click when the page
-  runs as a plain tab). Filenames come from `filename*`/`filename` or the
-  URL's last segment, always reduced to a **basename** with control characters
-  and leading dots stripped — a hostile server cannot steer the write out of
+- Non-renderable responses are downloaded instead of rendered: anything that
+  is not text, an image, or structured text (`+json`/`+xml`), and anything
+  sent with `Content-Disposition: attachment`, goes to `downloads.download`
+  (permission `downloads`; falls back to a synthetic `<a download>` click when
+  the page runs as a plain tab). Filenames come from `filename*`/`filename` or
+  the URL's last segment, always reduced to a basename with control characters
+  and leading dots stripped, so a hostile server cannot steer the write out of
   the download directory.
-- **Error pages** (`renderError`) are ordinary scriptless documents; their
+- Error pages (`renderError`) are ordinary scriptless documents; their
   buttons are anchors whose clicks the parent intercepts, the same mechanism
   as page links. Failed loads offer *Retry*, and a disconnected session offers
   *Connection settings* alongside it instead of only popping the dialog.
 
 ### Forms (`src/forms.ts`)
 
-`<form>`, `<input>` and `<button>` are no longer stripped. Supported: GET
-queries and `application/x-www-form-urlencoded` POST bodies — exactly what
-`httpxFetch` can carry (it turns a `URLSearchParams` body into the right
+`<form>`, `<input>` and `<button>` survive sanitization. Supported: GET
+queries and `application/x-www-form-urlencoded` POST bodies, which is exactly
+what `httpxFetch` can carry (it turns a `URLSearchParams` body into the right
 content type).
 
 The interception mechanism is the interesting part. The sandbox has no
-`allow-forms`, and **Chromium checks that flag before dispatching the `submit`
-event**, so a parent-side `submit` listener never fires at all (verified in
+`allow-forms`, and Chromium checks that flag before dispatching the `submit`
+event, so a parent-side `submit` listener never fires at all (verified in
 `test/browser/render.test.ts`). The options were to widen the sandbox with
 `allow-forms` just to receive an event we always cancel, or to drive
 submission the way links are already driven. We do the latter: the parent
 intercepts clicks on submit controls and Enter-key implicit submission, then
 computes the submission itself with `FormData` (which applies the standard
-construction algorithm — disabled controls skipped, unchecked boxes omitted,
+construction algorithm: disabled controls skipped, unchecked boxes omitted,
 the submitter's own name/value included). The sandbox stays exactly as tight
 as it was.
 
@@ -213,7 +214,7 @@ What is refused, marked at render time and explained at submit time:
 
 | Refusal | Why |
 |---|---|
-| `external-action` | A non-httpx action; the form's `action` attribute is also **removed** so a broken listener still cannot post user input to the internet |
+| `external-action` | A non-httpx action; the form's `action` attribute is also removed so a broken listener still cannot post user input to the internet |
 | `file-upload` | No uploads over httpx; `type=file` and `type=image` inputs are removed outright |
 | `multipart` | Only urlencoded bodies are supported |
 
@@ -227,14 +228,14 @@ Non-HTML responses render directly: images via blob URL, text in a `<pre>`.
 
 ### Caching (`src/cache.ts`)
 
-Responses are cached in the **Cache API**, which brings one constraint worth
+Responses are cached in the Cache API, which brings one constraint worth
 knowing: it only accepts http(s) request keys, so every httpx URL is mapped to
 a synthetic `https://httpx.invalid/<encoded>` key. Nothing ever fetches that
-URL — it is a key, not an address.
+URL; it is only a key.
 
-The cache is **partitioned per account** (`httpx-v1:<bare JID>`). httpx servers
-authorize per requester JID — an origin proxy even forwards it as
-`X-Httpx-From` — so a response fetched as one account must never be served to
+The cache is partitioned per account (`httpx-v1:<bare JID>`). httpx servers
+authorize per requester JID (an origin proxy even forwards it as
+`X-Httpx-From`), so a response fetched as one account must never be served to
 another. Naming the cache after the account makes that structural rather than
 something to remember on account switch; "Clear cache" clears every partition,
 including ones left by accounts since removed.
@@ -243,7 +244,7 @@ Bodies are buffered once and re-wrapped for both the caller and the cache.
 Teeing the stream instead would deadlock as soon as one side applied
 backpressure (the cache reads eagerly; a caller might never read at all).
 
-That buffering read is also where **byte progress** comes from
+That buffering read is also where byte progress comes from
 (`src/progress.ts`). The pipeline deliberately renders a *complete* document
 (partial markup is where mXSS lives, and re-sanitizing a growing buffer is
 O(n²)), so "progressive rendering" here honestly means progressive
@@ -251,30 +252,30 @@ O(n²)), so "progressive rendering" here honestly means progressive
 reports them to a per-tab callback; a thin bar under the chrome plus a byte
 chip ("1.2 MB of 3.4 MB") show the transfer, then the page renders once, as
 before. The bar sits *outside* the chrome so embedded mode (the Klar fork)
-keeps it — the one loading signal the host app's user gets. Each load reports
-through exactly one consumption point, decided by the cache state: the cache
-layer's miss path, or `load()`'s read of a "bypass" response (POST, degraded
-no-Cache-API mode) — never both, so the count never restarts mid-load. A
-surviving `Content-Length` makes the bar determinate (the library deletes the
-header whenever it transparently decompresses, so one that survives describes
-the bytes actually counted); it is still treated as a hint — bytes outgrowing
-it drop the bar to indeterminate. Reports from a superseded load are discarded
-by the same `loadSeq` guard the renders use.
+keeps it; that is the one loading signal the host app's user gets. Each load
+reports through exactly one consumption point, decided by the cache state:
+the cache layer's miss path, or `load()`'s read of a "bypass" response (POST,
+degraded no-Cache-API mode), and never both, so the count never restarts
+mid-load. A surviving `Content-Length` makes the bar determinate (the library
+deletes the header whenever it transparently decompresses, so one that
+survives describes the bytes actually counted); it is still treated as a hint,
+and bytes outgrowing it drop the bar to indeterminate. Reports from a
+superseded load are discarded by the same `loadSeq` guard the renders use.
 
 Freshness implements the parts of RFC 9111 a browser cache actually needs:
 `no-store` (never stored), `no-cache` (stored but always revalidated),
 `max-age` measured against a stored-at stamp plus any `Age`, and `Expires` as
-a fallback. **No heuristic freshness** — a response with no explicit lifetime
-is revalidated every time, which is the conservative choice for a transport
-where a stale page is more surprising than a round trip.
+a fallback. There is no heuristic freshness: a response with no explicit
+lifetime is revalidated every time, which is the conservative choice for a
+transport where a stale page is more surprising than a round trip.
 
 Revalidation sends `If-None-Match`/`If-Modified-Since`; a 304 refreshes the
 stored metadata (new `Cache-Control`, new `Date`) while keeping the body the
 server just vouched for. POST bypasses the cache and *invalidates* the entry
 for the URL it targeted, as browsers do for unsafe methods. Reload skips the
 freshness check but still revalidates, so an unchanged page costs one 304
-instead of a whole body over XMPP — the payoff that makes caching worth having
-on a transport this expensive.
+instead of a whole body over XMPP, which is the payoff that makes caching
+worth having on a transport this expensive.
 
 The chrome shows which of those happened (`cache` / `304` / `network`), and
 the settings dialog can clear the cache.
@@ -284,16 +285,16 @@ the settings dialog can clear the cache.
 Visits and bookmarks live in `storage.local` (with the same `localStorage`
 fallback the settings use, so the page still works as a plain tab). Revisiting a
 URL updates its title and timestamp and moves it to the front instead of adding
-a row — the drawer lists *pages*, not page views — and history is capped at 500
+a row (the drawer lists *pages*, not page views), and history is capped at 500
 entries. POST results and downloads are deliberately not recorded: neither is a
 URL you can return to. Fragments are stripped and non-httpx URLs refused, so
 every row is something the browser can actually revisit.
 
-The security-relevant part is small but worth naming: **page titles are the only
-hostile string this project puts into the extension's own DOM** rather than into
+The security-relevant part is small but worth naming: page titles are the only
+hostile string this project puts into the extension's own DOM rather than into
 the sandboxed iframe. So titles are normalized on the way in (whitespace
 collapsed, capped at 200 characters, falling back to the URL) and the list is
-built exclusively with `textContent` — no page-supplied string is ever parsed as
+built exclusively with `textContent`; no page-supplied string is ever parsed as
 markup. That list building lives in `src/drawer.ts` rather than `app.ts`
 precisely so a test can hold it to that promise
 (`test/browser/drawer.test.ts`). Stored state is also re-validated on read, so a
@@ -302,14 +303,14 @@ corrupt or hand-edited store degrades to an empty list instead of a broken UI.
 ## Manifest strategy
 
 One `manifest.base.json`; `scripts/make-manifests.mjs` writes the two real
-manifests because the divergences are structural, not cosmetic:
+manifests because the divergences are structural:
 
 | Key | Chromium | Firefox |
 |---|---|---|
 | `background` | `service_worker` | `scripts` (event page) |
 | `browser_specific_settings.gecko` | — | required (`id`, `strict_min_version: 128.0`) |
 | `protocol_handlers` | unsupported | `ext+httpx` → `/browser.html#%s` |
-| `content_security_policy` | default | explicit, to **drop `upgrade-insecure-requests`** (Firefox's MV3 default would rewrite dev-time `ws://localhost` to `wss://`) |
+| `content_security_policy` | default | explicit, to drop `upgrade-insecure-requests` (Firefox's MV3 default would rewrite dev-time `ws://localhost` to `wss://`) |
 
 Shared: MV3, `permissions: ["storage", "downloads"]` (WebSocket connections
 from extension pages need no host permissions), `omnibox`, `action`.
@@ -320,25 +321,25 @@ Vite 8 builds `browser.html` (`base: "./"` for extension-root relative
 assets) into `dist/app/`; the manifest script assembles `dist/chromium/` and
 `dist/firefox/`. The library is consumed via `"xmpp-httpx": "file:../.."`,
 so `npm run build` in the example builds the root `dist/` first. Verified:
-the produced bundle contains **zero** Node built-ins (xmpp.js's `browser`
+the produced bundle contains zero Node built-ins (xmpp.js's `browser`
 fields stub `dns` etc.), and `web-ext lint` reports 0 errors.
 
-The full stack the extension drives — ws:// connection to Prosody,
-`httpxFetch` for pages/images/404s, `resolveHttpxUrl` for relative links —
+The full stack the extension drives (ws:// connection to Prosody,
+`httpxFetch` for pages/images/404s, `resolveHttpxUrl` for relative links)
 is exercised headlessly against `scripts/demo-gateway.mjs` (see
 [testing.md](testing.md)); interactive testing in real browser windows is
 manual by nature.
 
-The rendering pipeline itself — sanitization, CSS, subresource fetching, blob
-lifetime, click interception — is unit-tested in real Chromium under the
+The rendering pipeline itself (sanitization, CSS, subresource fetching, blob
+lifetime, click interception) is unit-tested in real Chromium under the
 `browser` vitest project (`test/browser/`, see [testing.md](testing.md)).
 
 ## Known limitations (deliberate, demo-grade)
 
 - Credentials in extension storage in plaintext; `ws://` only for the local
-  dev Prosody — production must be `wss://`.
+  dev Prosody, and production must be `wss://`.
 - No file uploads or multipart forms (urlencoded GET/POST work); no streaming
-  render — a page paints only when its body has fully arrived (the bar under
+  render, so a page paints only when its body has fully arrived (the bar under
   the chrome shows the transfer).
 - `web-ext lint` flags Firefox's upcoming data-consent manifest key and the
-  (sanitized) `srcdoc` assignment as warnings — both acknowledged.
+  (sanitized) `srcdoc` assignment as warnings; both are acknowledged.

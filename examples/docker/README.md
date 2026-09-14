@@ -4,7 +4,7 @@ This is the "put your website on XMPP" shape, running for real:
 
 | Service | What it is |
 |---|---|
-| `origin` | An ordinary website (nginx serving `site/`). **Not published to the host** — only the gateway can reach it. |
+| `origin` | An ordinary website (nginx serving `site/`). Not published to the host; only the gateway can reach it. |
 | `prosody` | The XMPP server. c2s on 5222, websocket on 5280. |
 | `gateway` | `xmpp-httpx-gateway` from the repo's [`Dockerfile`](../../Dockerfile), owning the component `web.localhost`. |
 
@@ -18,7 +18,7 @@ docker compose up -d --wait
 docker compose exec prosody prosodyctl register alice localhost demo-password
 ```
 
-That's it — `httpx://web.localhost/` is now served. To browse it:
+That's it; `httpx://web.localhost/` is now served. To browse it:
 
 1. Build the WebExtension: `npm --prefix ../webext run build` (from this
    directory) and load `examples/webext/dist/firefox` or `dist/chromium`.
@@ -53,16 +53,16 @@ Watch it work: `docker compose logs -f gateway` prints one line per request.
 
 ## How it is wired
 
-- **`gateway.json`** holds everything except the secret; `XMPP_HTTPX_SECRET` in
+- `gateway.json` holds everything except the secret; `XMPP_HTTPX_SECRET` in
   `compose.yml` supplies that, so it never lands in the image or in `ps`. Flags
   would override both (`command: ["--config", "…", "--quiet"]`).
-- **`allow: ["alice@localhost"]`** — only that JID is served. Try it as another
+- `allow: ["alice@localhost"]` means only that JID is served. Try it as another
   account and the gateway refuses *before* the origin is contacted. Swap in
   `"allow": "all"` for a public gateway; there is deliberately no default.
-- **`maxStanzaBytes: 65536`** derives inline/chunk budgets from what this Prosody
+- `maxStanzaBytes: 65536` derives inline/chunk budgets from what this Prosody
   accepts. Without it the library uses conservative defaults, since the limit is
   not discoverable from the client side.
-- **`depends_on: service_healthy`** for both — the gateway exits non-zero on a
+- `depends_on: service_healthy` for both: the gateway exits non-zero on a
   failed XMPP connection, and `restart: unless-stopped` plus healthy
   dependencies is what keeps a restart loop from being the normal state.
 - `docker compose stop` sends SIGTERM; the CLI closes the XMPP stream and exits
@@ -100,8 +100,8 @@ file in this repo. Both are fine for a laptop and wrong for a deployment: use
 `wss://`, a real authentication backend, and a secret from your orchestrator's
 secret store (`XMPP_HTTPX_SECRET` is already the right shape for that).
 
-The origin being unreachable from the host is *not* incidental — the gateway
-tells the origin who is asking via `X-Httpx-From`, and that header is only
+The origin being unreachable from the host is deliberate: the gateway tells
+the origin who is asking via `X-Httpx-From`, and that header is only
 trustworthy because nothing else can talk to the origin. Keep it that way.
 
 ## Tear down

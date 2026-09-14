@@ -4,36 +4,36 @@
 [![npm](https://img.shields.io/npm/v/xmpp-httpx)](https://www.npmjs.com/package/xmpp-httpx)
 [![API belgeleri](https://img.shields.io/badge/API-typedoc-blue)](https://ooguz.github.io/xmpp-httpx/)
 
-[XEP-0332: HTTP over XMPP Transport](https://xmpp.org/extensions/xep-0332.html) belirtiminin TypeScript uygulaması — HTTP istek ve yanıtlarını XMPP üzerinden taşır; Node.js ve tarayıcılar için.
+[XEP-0332: HTTP over XMPP Transport](https://xmpp.org/extensions/xep-0332.html) belirtiminin TypeScript uygulaması. HTTP istek ve yanıtlarını XMPP üzerinden taşır; Node.js ve tarayıcılar için.
 
 *[English documentation: README.md](README.md)*
 
 XEP-0332 **Deferred** (askıya alınmış) durumda bir XEP'tir (v0.5.1). Bu kitaplık, belirtimin açıkça teşvik ettiği türden bir keşif amaçlı uygulamadır ve `httpx://kullanıcı@alan/yol` adreslerinde gezinen bir tarayıcının temeli olarak yazılmıştır.
 
-**Belgeler** (İngilizce):
+Belgeler (İngilizce):
 
 | Belge | İçerik |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Tasarım kuralları, modül haritası, istek yaşam döngüsü, yedi taşıma yönteminin tümü, hata ve güvenlik modelleri, yapılandırma başvurusu |
-| [docs/protocol-notes.md](docs/protocol-notes.md) | Belirtimin belirsiz kaldığı her yerde verilen kararlar — birlikte çalışabilirliğin dayanağı |
+| [docs/protocol-notes.md](docs/protocol-notes.md) | Belirtimin belirsiz kaldığı her yerde verilen kararlar; birlikte çalışabilirliğin dayanağı |
 | [docs/testing.md](docs/testing.md) | Üç vitest projesi, sahte oturum düzeneği, Prosody uçtan uca testleri, CI |
 | [docs/browser-extension.md](docs/browser-extension.md) | Tarayıcı eklentisinin mimarisi: bağlantının nerede durduğu, işleme hattı, sekmeler, manifest stratejisi |
 | [docs/gateway-cli.md](docs/gateway-cli.md) | `xmpp-httpx-gateway`: mevcut bir HTTP sunucusunu elle ya da Docker ile XMPP üzerine taşımak |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sıradaki aşamalar ve işler |
 | [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | XSF standart süreci için uygulama deneyimi notları |
-| [docs/interop.md](docs/interop.md) | Birlikte çalışabilirlik tablosu — denenmiş sunucular, çalışma ortamları, karşı uygulamalar |
+| [docs/interop.md](docs/interop.md) | Birlikte çalışabilirlik tablosu: denenmiş sunucular, çalışma ortamları, karşı uygulamalar |
 | [examples/webext/README.md](examples/webext/README.md) | Tarayıcı eklentisini derleme/çalıştırma kılavuzu |
 | [CHANGELOG.md](CHANGELOG.md) | Sürüm geçmişi |
 
 ## Neler var
 
-- Protokolün hem **isteyen (istemci)** hem **yanıtlayan (sunucu)** tarafı
-- XEP'teki **yedi gövde taşıma yönteminin tümü**: gömülü (inline) `text` / `xml` / `base64`, `chunkedBase64` ileti akışları, **IBB** ([XEP-0047](https://xmpp.org/extensions/xep-0047.html) — burada baştan yazıldı, çünkü xmpp.js tarafında bir paketi yok), **sipub** ([XEP-0137](https://xmpp.org/extensions/xep-0137.html), SI üzerinden, IBB akış yöntemiyle) ve bir **Jingle** oturumu ([XEP-0166](https://xmpp.org/extensions/xep-0166.html)/[0234](https://xmpp.org/extensions/xep-0234.html)); ister [XEP-0261](https://xmpp.org/extensions/xep-0261.html) IBB taşıması, ister aday uzlaşımı ve otomatik IBB'ye dönüşü olan [XEP-0260](https://xmpp.org/extensions/xep-0260.html) SOCKS5 bytestream taşıması üzerinden. sipub ve jingle gönderirken isteğe bağlıdır (`preferredStreams`), alırken her zaman kabul edilir
+- Protokolün hem isteyen (istemci) hem yanıtlayan (sunucu) tarafı
+- XEP'teki yedi gövde taşıma yönteminin tümü: gömülü (inline) `text` / `xml` / `base64`, `chunkedBase64` ileti akışları, IBB ([XEP-0047](https://xmpp.org/extensions/xep-0047.html); burada baştan yazıldı, çünkü xmpp.js tarafında bir paketi yok), sipub ([XEP-0137](https://xmpp.org/extensions/xep-0137.html), SI üzerinden, IBB akış yöntemiyle) ve bir Jingle oturumu ([XEP-0166](https://xmpp.org/extensions/xep-0166.html)/[0234](https://xmpp.org/extensions/xep-0234.html)); ister [XEP-0261](https://xmpp.org/extensions/xep-0261.html) IBB taşıması, ister aday uzlaşımı ve otomatik IBB'ye dönüşü olan [XEP-0260](https://xmpp.org/extensions/xep-0260.html) SOCKS5 bytestream taşıması üzerinden. sipub ve jingle gönderirken isteğe bağlıdır (`preferredStreams`), alırken her zaman kabul edilir
 - SHIM başlıkları ([XEP-0131](https://xmpp.org/extensions/xep-0131.html)), `httpx://` adres çözümleme, hizmet keşfi ([XEP-0030](https://xmpp.org/extensions/xep-0030.html)), varlık yetenekleri ([XEP-0115](https://xmpp.org/extensions/xep-0115.html)) ve durum bildirimlerinden (presence) beslenen yetenek önbelleği
 - Gerçek WHATWG `Response` nesneleri döndüren, akışlı gövdeleri olan `fetch()` biçiminde bir arayüz
 - Geçit (gateway) kurulumları için ters vekil sunucu işleyicisi (`xmpp-httpx/node`)
 - Hazır bir geçit komut satırı aracı (`xmpp-httpx-gateway`) ve Docker imajı
-- Yayımlanmış bir test düzeneği (`xmpp-httpx/testing`) — böylece sizin kodunuz da XMPP sunucusu olmadan test edilebilir
+- Yayımlanmış bir test düzeneği (`xmpp-httpx/testing`); böylece sizin kodunuz da XMPP sunucusu olmadan test edilebilir
 
 ## Kurulum
 
@@ -71,7 +71,7 @@ console.log(resp.statusCode, await resp.json());
 
 Yanıt gövdeleri `ReadableStream<Uint8Array>` türündendir: büyük gövdeler, hangi mekanizmayla (gömülü, parçalı ileti, IBB) taşındığına bakılmaksızın kademeli olarak akar. `.text()`, `.json()`, `.bytes()`, `.xml()` ve `.formData()` yöntemlerinin hepsi vardır. XMPP düzeyindeki başarısızlıklar (yetkisiz, zaman aşımı, ulaşılamaz) `httpEquivalent` durum kodunu taşıyan bir `HttpxError` fırlatır; yanıt nesnesi yalnızca gerçek `<resp>` yapıtaşlarından (stanza) üretilir.
 
-Her istek için `timeoutMs` (IQ süresi), `idleTimeoutMs` (akan bir gövdenin parçaları arasında izin verilen boşluk) ve `signal` verilebilir — genel bir süre sınırı için `AbortSignal.timeout(5000)` yeterlidir.
+Her istek için `timeoutMs` (IQ süresi), `idleTimeoutMs` (akan bir gövdenin parçaları arasında izin verilen boşluk) ve `signal` verilebilir; genel bir süre sınırı için `AbortSignal.timeout(5000)` yeterlidir.
 
 ## Sunucu
 
@@ -127,7 +127,7 @@ Bu komut, HTTP sunucunuzu `httpx://web.example.org/…` adresinden sunar ve her 
 
 `--static <dizin>` hiç HTTP sunucusu olmadan bir dizini sunar; `--rate`/`--burst` istek sahibi başına hız sınırlar (gerçek bir 429 ve `Retry-After` ile); `--metrics-port` Prometheus ölçümlerini ve bir `/healthz` ucunu açar.
 
-Kurulum örneği olarak [`examples/docker/`](examples/docker/) üç kapsayıcılı bir yığın sunar — nginx kaynağı, Prosody, geçit — ve `docker compose up`'tan gezilebilir bir `httpx://web.localhost/` adresine iki komutta ulaşır.
+Kurulum örneği olarak [`examples/docker/`](examples/docker/) üç kapsayıcılı bir yığın sunar (nginx kaynağı, Prosody, geçit) ve `docker compose up`'tan gezilebilir bir `httpx://web.localhost/` adresine iki komutta ulaşır.
 
 ## Geliştirme
 
@@ -139,7 +139,7 @@ npm run build                       # dist/ üretir
 npm run demo                        # Prosody + örnek site, tek komut
 ```
 
-Tümleştirme testleri her iki uç noktayı, hata enjeksiyonu yapabilen (parçaları sırasız teslim eden) bellek içi bir yapıtaşı yönlendiricisine karşı çalıştırır; böylece IBB akış denetimi dahil protokolün tamamı gerçek bir XMPP sunucusu olmadan sınanır. Bu düzenek **`xmpp-httpx/testing`** olarak yayımlanır, yani kendi işleyicilerinizi de aynı biçimde test edebilirsiniz:
+Tümleştirme testleri her iki uç noktayı, hata enjeksiyonu yapabilen (parçaları sırasız teslim eden) bellek içi bir yapıtaşı yönlendiricisine karşı çalıştırır; böylece IBB akış denetimi dahil protokolün tamamı gerçek bir XMPP sunucusu olmadan sınanır. Bu düzenek `xmpp-httpx/testing` olarak yayımlanır, yani kendi işleyicilerinizi de aynı biçimde test edebilirsiniz:
 
 ```js
 import { createSessionPair } from "xmpp-httpx/testing";
@@ -150,7 +150,7 @@ const [clientSession, serverSession] = createSessionPair("alice@example.org/pc",
 
 ## Tarayıcı
 
-[`examples/webext/`](examples/webext/) dizini, bu kitaplıkla `httpx://` adreslerinde gezinen, **Firefox ve Chromium için çalışan bir tarayıcı eklentisidir**: her sekmenin kendi geçmişi olan sekme çubuğu, adres çubuğu, geçmiş/yer imleri çekmecesi, omnibox anahtar sözcüğü (`httpx server@example.org/page` ⏎), Firefox'ta tıklanabilir `ext+httpx://` bağlantıları ve arındırılmış bir işleme hattı (DOMPurify + CSSOM tabanlı CSS arındırıcı → blob adresli alt kaynaklar → betik çalıştırmayan, yalıtılmış iframe); ayrıca formlar, indirmeler, sayfa başlıkları/simgeleri ve gerçek 304 doğrulaması yapan bir HTTP önbelleği. Derleme/çalıştırma yönergeleri için eklentinin kendi README dosyasına, gezilecek bir örnek site için `scripts/demo-gateway.mjs`'ye, tüm bunları gerçek Chromium'da sınamak için `npm run smoke` komutuna bakın.
+[`examples/webext/`](examples/webext/) dizini, bu kitaplıkla `httpx://` adreslerinde gezinen, Firefox ve Chromium için çalışan bir tarayıcı eklentisidir: her sekmenin kendi geçmişi olan sekme çubuğu, adres çubuğu, geçmiş/yer imleri çekmecesi, omnibox anahtar sözcüğü (`httpx server@example.org/page` ⏎), Firefox'ta tıklanabilir `ext+httpx://` bağlantıları ve arındırılmış bir işleme hattı (DOMPurify + CSSOM tabanlı CSS arındırıcı → blob adresli alt kaynaklar → betik çalıştırmayan, yalıtılmış iframe); ayrıca formlar, indirmeler, sayfa başlıkları/simgeleri ve gerçek 304 doğrulaması yapan bir HTTP önbelleği. Derleme/çalıştırma yönergeleri için eklentinin kendi README dosyasına, gezilecek bir örnek site için `scripts/demo-gateway.mjs`'ye, tüm bunları gerçek Chromium'da sınamak için `npm run smoke` komutuna bakın.
 
 ## Masaüstü kabuğu ve Dillo eklentisi
 

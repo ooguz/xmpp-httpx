@@ -1,4 +1,4 @@
-# xmpp-httpx — Testing infrastructure
+# xmpp-httpx testing infrastructure
 
 Three vitest projects (configured in `vitest.config.ts` via `test.projects`),
 plus a manual demo path. Everything below `session.send()` is exercised by
@@ -13,71 +13,71 @@ suite against a real Prosody.
 | `browser` | `npm run test:browser` | headless Chromium (Playwright) | the same suites, plus `test/browser/**` |
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
 
-Two directories are single-project by nature: `test/integration-node/`
-(raw TCP sockets for SOCKS5 bytestreams — XEP-0065 and the XEP-0260 jingle
-negotiation in *both* directions, sender-hosted and receiver-hosted, each
-carrying a body over a real socket — the CLI's metrics/health
-listener over a real socket, and the static-site handler against real temp
-directories) runs only under `node`, and
-`test/browser/` (real CSSOM, `DOMParser`, blob URLs) only under `browser`.
+Two directories are single-project by nature. `test/integration-node/` runs
+only under `node`: it covers raw TCP sockets for SOCKS5 bytestreams (XEP-0065
+and the XEP-0260 jingle negotiation in *both* directions, sender-hosted and
+receiver-hosted, each carrying a body over a real socket), the CLI's
+metrics/health listener over a real socket, and the static-site handler
+against real temp directories. `test/browser/` (real CSSOM, `DOMParser`, blob
+URLs) runs only under `browser`.
 
 The `browser` project exists to *prove* the browser-safe-core rule: the full
-protocol stack — codec, chunk reassembly, IBB flow control, sipub/jingle
-handshakes, client↔server integration — runs in a real browser engine.
+protocol stack (codec, chunk reassembly, IBB flow control, sipub/jingle
+handshakes, client↔server integration) runs in a real browser engine.
 Everything the suites need is environment-agnostic; XML fixtures are loaded
 via Vite `?raw` static imports so one test file serves both projects.
-`@vitest/browser-playwright` peer-pins vitest **exactly** — upgrade the two
+`@vitest/browser-playwright` peer-pins vitest exactly, so upgrade the two
 together.
 
 ## Unit tests (`test/unit/`)
 
-- `codec.test.ts` — decodes fixtures transcribed **verbatim from XEP-0332's
-  examples** (`test/fixtures/*.xml`), round-trips through serialize→parse,
+- `codec.test.ts`: decodes fixtures transcribed verbatim from XEP-0332's
+  examples (`test/fixtures/*.xml`), round-trips through serialize→parse,
   and covers every `CodecError` path including the sipub/jingle descriptor
   rules (wrong namespace → `unsupported`, missing id/sid → error).
-- `base64.test.ts` — property-tested (fast-check) against the platform's
+- `base64.test.ts`: property-tested (fast-check) against the platform's
   `btoa` as reference; whitespace tolerance; invalid input.
-- `chunked.test.ts` — the reassembler under **random chunk permutations**
+- `chunked.test.ts`: the reassembler under random chunk permutations
   (fast-check), plus duplicate-nr, post-`last` chunks, invalid base64,
   buffer overflow, and idle-timeout error paths.
-- `select.test.ts` — the encoding decision table, including preference
+- `select.test.ts`: the encoding decision table, including preference
   order and per-mechanism accept flags.
-- `caps.test.ts` — reproduces the XEP-0115 §5.2 worked example hash
+- `caps.test.ts`: reproduces the XEP-0115 §5.2 worked example hash
   (`QgayPKawpkPSDYmwT/WM94uAlu0=`); order-independence; disco-result
   recomputation.
-- `urls.test.ts`, `errors.test.ts` — URL codec incl. browser-style relative
+- `urls.test.ts`, `errors.test.ts`: URL codec incl. browser-style relative
   resolution; stanza-condition mapping.
-- `negotiate.test.ts` — `Accept` parsing and content negotiation: q ordering,
-  wildcards, `q=0` as a refusal, ties broken by the server's own preference, and
-  the RFC 9110 rule that the most specific pattern governs (so `*/*;q=0.1` does
-  not drag down an explicit `text/html`).
-- `response-form.test.ts` — `HttpxResponse.formData()` over urlencoded *and*
+- `negotiate.test.ts`: `Accept` parsing and content negotiation, covering q
+  ordering, wildcards, `q=0` as a refusal, ties broken by the server's own
+  preference, and the RFC 9110 rule that the most specific pattern governs
+  (so `*/*;q=0.1` does not drag down an explicit `text/html`).
+- `response-form.test.ts`: `HttpxResponse.formData()` over urlencoded *and*
   multipart bodies, plus the two ways it refuses clearly.
-- `jingle-s5b.test.ts` — the XEP-0260 layer: candidate/transport round trips
+- `jingle-s5b.test.ts`: the XEP-0260 layer. Candidate/transport round trips
   through real XML, every malformed-candidate refusal, the priority formula
   (including that a proxy can never outrank a direct candidate), and the §2.4
-  reconciliation — most importantly run from *both* viewpoints of the same
-  negotiation to prove the two peers pick the same candidate rather than
-  deadlocking on a tie.
-- `rate-limit.test.ts` — the token bucket with a hand-moved clock: burst then
-  429, `Retry-After` never earlier than a token exists, refill capped at the
-  burst, per-bare-JID isolation (including that extra resources do *not*
+  reconciliation, which is run from *both* viewpoints of the same negotiation
+  to prove the two peers pick the same candidate rather than deadlocking on a
+  tie.
+- `rate-limit.test.ts`: the token bucket driven by a hand-moved clock. Burst
+  then 429, `Retry-After` never earlier than a token exists, refill capped at
+  the burst, per-bare-JID isolation (including that extra resources do *not*
   multiply a quota), the bounded tracking map, and that the wrapped handler is
   never reached for a refused request.
-- `cli-config.test.ts` — the gateway CLI's config layer, which is pure on
-  purpose: mode validation, the refusal to start without an authorization
+- `cli-config.test.ts`: the gateway CLI's config layer, which is pure on
+  purpose. Mode validation, the refusal to start without an authorization
   decision, byte/mechanism/port parsing, and flags > env > file precedence.
-- `cli-observability.test.ts` — the metrics registry's exposition format
+- `cli-observability.test.ts`: the metrics registry's exposition format
   (cumulative histogram buckets, label escaping, HELP/TYPE for every metric,
   bare-JID denial labels) and both logger formats, with the clock and sinks
   injected so the output is asserted exactly.
 
 ## Integration harness (`src/testing/mock-session.ts`)
 
-**Published as `xmpp-httpx/testing`.** It lives in `src/` rather than `test/`
-precisely so downstream users get it: testing an httpx handler otherwise means
+Published as `xmpp-httpx/testing`. It lives in `src/` rather than `test/` so
+that downstream users get it: testing an httpx handler otherwise means
 standing up an XMPP server. It is the same harness this suite runs on, so it
-cannot quietly drift from real semantics — these tests would fail first.
+cannot drift from real semantics unnoticed; these tests would fail first.
 
 `createSessionPair()` returns two in-memory `XmppSession`s that mirror
 @xmpp/iq semantics faithfully: async handlers, error elements → IQ errors,
@@ -85,24 +85,23 @@ thrown handlers → `internal-server-error`, no matching handler →
 `service-unavailable`, `StanzaError`-shaped rejections with `.condition`,
 timeout rejections with `name: "TimeoutError"`.
 
-Two properties make it trustworthy:
-
-- **Wire realism**: every stanza is serialized and re-parsed on send, so
-  nothing survives that wouldn't survive real XML.
-- **Fault injection**: `session.deliverHook = (stanza, deliver) => …` lets a
-  test hold, drop, or reorder deliveries — the chunked suite delivers an
-  entire chunk stream in **reverse order** this way.
+Two properties make it trustworthy: wire realism and fault injection. Every
+stanza is serialized and re-parsed on send, so nothing survives that wouldn't
+survive real XML. And `session.deliverHook = (stanza, deliver) => …` lets a
+test hold, drop, or reorder deliveries; the chunked suite delivers an entire
+chunk stream in reverse order this way.
 
 Suites: `jingle-s5b.test.ts` (the XEP-0260 choreography with a fake in-process
-bytestream: a body over a negotiated candidate, and each of the three routes into
-the IBB fallback — no candidates offered, none reachable, and a receiver with no
-adapter at all; each asserts *which* transport carried the bytes rather than only
-that they arrived), `roundtrip.test.ts` (inline flows, failure mapping,
-component-style addressing), `streaming.test.ts` (1 MiB chunked, reordering, IBB both
-directions, `httpxFetch` bridge), `abort.test.ts` (AbortSignal / cancel /
-close propagation), `sipub.test.ts` / `jingle.test.ts` (handshakes, expiry,
-peer binding, decline paths, duplicate-initiate hedge), `caps.test.ts`
-(presence-learned capabilities, one-query-per-ver).
+bytestream: a body over a negotiated candidate, and each of the three routes
+into the IBB fallback, namely no candidates offered, none reachable, and a
+receiver with no adapter at all; each asserts *which* transport carried the
+bytes rather than only that they arrived), `roundtrip.test.ts` (inline flows,
+failure mapping, component-style addressing), `streaming.test.ts` (1 MiB
+chunked, reordering, IBB both directions, `httpxFetch` bridge),
+`abort.test.ts` (AbortSignal / cancel / close propagation), `sipub.test.ts` /
+`jingle.test.ts` (handshakes, expiry, peer binding, decline paths,
+duplicate-initiate hedge), `caps.test.ts` (presence-learned capabilities,
+one-query-per-ver).
 
 ## E2E against Prosody (`test/e2e/`)
 
@@ -114,7 +113,7 @@ Gated behind `E2E=1` (the vitest project isn't even constructed without it).
 | Piece | Value |
 |---|---|
 | Image | `prosodyim/prosody:13.0` |
-| Host ports | 15222 (c2s), **15280 (websocket — the tested transport)**, 15347 (component) |
+| Host ports | 15222 (c2s), 15280 (websocket, the tested transport), 15347 (component) |
 | Users | `alice` / `e2e-alice`, `bob` / `e2e-bob` on `localhost` |
 | Component | `httpx.localhost`, secret `e2e-secret` |
 
@@ -122,31 +121,32 @@ Config quirks captured in `prosody/prosody.cfg.lua` (both were found the
 hard way): `pidfile` must be set or the `prosodyctl status` healthcheck
 fails, and `http_interfaces = { "*", "::" }` is required or the websocket
 listener binds loopback-only inside the container. Clients connect over
-`ws://localhost:15280/xmpp-websocket` — no TLS, which sidesteps xmpp.js's
+`ws://localhost:15280/xmpp-websocket` with no TLS, which sidesteps xmpp.js's
 self-signed-STARTTLS pain *and* exercises the same transport the
 WebExtension uses.
 
 Suites: `c2s-roundtrip.e2e.test.ts` (inline/IBB/chunked/sipub/jingle bodies
-between two real users — the sipub/jingle cases connect extra `bob`
+between two real users; the sipub/jingle cases connect extra `bob`
 resources because one session supports one `HttpxServer`) and
 `component-gateway.e2e.test.ts` (`httpxFetch` → XEP-0114 component serving
 `demo-site.ts`: pages, an image, a 404, a GET form query, a urlencoded POST
-body with non-ASCII text, an attachment, and an `If-None-Match` → **304**
-round trip — the whole surface the WebExtension drives), plus
+body with non-ASCII text, an attachment, and an `If-None-Match` → 304
+round trip, which is the whole surface the WebExtension drives), plus
 `cli-gateway.e2e.test.ts` (the gateway CLI in front of a real HTTP origin:
 status pass-through, `X-Httpx-From`, a proxied POST body, and an unlisted JID
 refused *before* the origin is contacted) and, in the same file, a `--static`
-gateway serving a temp directory with a real 304 revalidation over the wire, and
-a `--rate 1 --burst 2` gateway whose third request comes back 429 with
+gateway serving a temp directory with a real 304 revalidation over the wire,
+and a `--rate 1 --burst 2` gateway whose third request comes back 429 with
 `Retry-After` and recovers after a second.
 
-The static handler's path safety is tested where it can be tested honestly — on
-a real filesystem (`test/integration-node/static-site.test.ts`): percent-encoded
-traversal, a sibling directory sharing the root's name prefix, and a **symlink
-pointing out of the root**, each asserted not to return the outside file.
+The static handler's path safety is tested where it can be tested honestly,
+on a real filesystem (`test/integration-node/static-site.test.ts`):
+percent-encoded traversal, a sibling directory sharing the root's name
+prefix, and a symlink pointing out of the root, each asserted not to return
+the outside file.
 
-E2E files run **sequentially** (`fileParallelism: false`): they share one
-Prosody, and a component domain admits exactly one connection — two suites
+E2E files run sequentially (`fileParallelism: false`): they share one
+Prosody, and a component domain admits exactly one connection, so two suites
 binding `httpx.localhost` at once get `conflict — Component already connected`.
 
 ## Browser-only suites (`test/browser/`)
@@ -154,149 +154,152 @@ binding `httpx.localhost` at once get `conflict — Component already connected`
 The WebExtension's rendering pipeline is security-critical and pure
 browser-API code, so it is tested in real Chromium rather than by hand:
 
-- `sanitize-css.test.ts` — the CSSOM sanitizer: at-rule allow-listing,
+- `sanitize-css.test.ts`: the CSSOM sanitizer. At-rule allow-listing,
   `url()` resolution and rejection, `expression()`/`behavior` removal,
   `!important` preservation, `</style>` re-escaping, idempotence, and the
   resolver contract the render pipeline depends on.
-- `render.test.ts` — `renderHtml`/`renderPlain`/`renderError` against a real
-  sandboxed iframe: scripts/framing/handlers stripped, page CSS surviving,
+- `render.test.ts`: `renderHtml`/`renderPlain`/`renderError` against a real
+  sandboxed iframe. Scripts/framing/handlers stripped, page CSS surviving,
   httpx images and CSS references fetched into `blob:` URLs (deduplicated,
   revoked on cleanup), unavailable resources degrading instead of throwing,
   relative links resolved, click interception reporting only `httpx:`
   navigation, form submission intercepted from control clicks and the Enter
   key (this is where the "no submit event under sandbox" behavior is pinned
   down), and error-page actions reported back to the host.
-- `download.test.ts` — renderable-vs-downloadable content types and
+- `download.test.ts`: renderable-vs-downloadable content types and
   `Content-Disposition` filename parsing, including the traversal/control-char
   cases a hostile server would send.
-- `page-meta.test.ts` — title/favicon extraction from raw HTML: trimming and
-  capping, `rel~="icon"` spellings, last-icon-wins, scheme refusal.
-- `forms.test.ts` — action resolution, the three refusal cases, submitter
+- `page-meta.test.ts`: title/favicon extraction from raw HTML, covering
+  trimming and capping, `rel~="icon"` spellings, last-icon-wins, scheme
+  refusal.
+- `forms.test.ts`: action resolution, the three refusal cases, submitter
   overrides stripped, GET query construction, urlencoded POST bodies, and
   which controls submit (`<button>` yes, `type=button`/`reset` no).
-- `cache.test.ts` — the HTTP cache against a scripted server: freshness
+- `cache.test.ts`: the HTTP cache against a scripted server. Freshness
   arithmetic (`max-age` + `Age`, `Expires`, `no-cache`), storability rules,
   `If-None-Match`/`If-Modified-Since` revalidation returning a 304 and the
   cached body, lifetime refreshed from the 304's headers, body replacement,
   invalidation, and recovery from a 304 with nothing cached.
 
-- `history.test.ts` — visit history and bookmarks over the `localStorage`
-  fallback: dedup-and-bump on revisit, ordering, the 500-entry cap, URL
-  normalization, refusal of non-httpx URLs, independence of bookmarks from
-  history, and self-healing from corrupt stored state.
-- `drawer.test.ts` — the drawer list DOM: a hostile page title stays text (no
+- `history.test.ts`: visit history and bookmarks over the `localStorage`
+  fallback, covering dedup-and-bump on revisit, ordering, the 500-entry cap,
+  URL normalization, refusal of non-httpx URLs, independence of bookmarks
+  from history, and self-healing from corrupt stored state.
+- `drawer.test.ts`: the drawer list DOM. A hostile page title stays text (no
   element is created from it), and open/remove clicks report the right URL.
-- `tabs.test.ts` — the tab model: per-tab back/forward stacks staying
-  independent, forward entries discarded on a new navigation, reloads adding no
-  entry, the depth cap, which tab activates when one closes, and the last tab
-  leaving a fresh empty one.
-- `tab-strip.test.ts` — the strip DOM: active marking, tooltips, hostile titles
-  staying text, and select-vs-close reported separately.
+- `tabs.test.ts`: the tab model. Per-tab back/forward stacks staying
+  independent, forward entries discarded on a new navigation, reloads adding
+  no entry, the depth cap, which tab activates when one closes, and the last
+  tab leaving a fresh empty one.
+- `tab-strip.test.ts`: the strip DOM. Active marking, tooltips, hostile
+  titles staying text, and select-vs-close reported separately.
 
-These import `examples/webext/src/*` directly; the **browser project** aliases
-the `xmpp-httpx` package specifier (the example consumes the library by name) to
-`src/index.ts`, and `tsconfig.json` mirrors that with `paths`, so neither a built
-`dist/` nor an install inside the example is required. Note the alias must sit on
-the *project* config: `test.projects` entries do not inherit a root-level
-`resolve`, and an install inside the example masks the difference locally — it
-was a CI-only failure until the alias moved.
+These import `examples/webext/src/*` directly; the browser project aliases
+the `xmpp-httpx` package specifier (the example consumes the library by name)
+to `src/index.ts`, and `tsconfig.json` mirrors that with `paths`, so neither
+a built `dist/` nor an install inside the example is required. Note the alias
+must sit on the *project* config: `test.projects` entries do not inherit a
+root-level `resolve`, and an install inside the example masks the difference
+locally. It was a CI-only failure until the alias moved.
 
 ## Fuzzing & adversarial testing
 
-- **`test/unit/fuzz.test.ts`** (fast-check) asserts the decoder contract:
+- `test/unit/fuzz.test.ts` (fast-check) asserts the decoder contract:
   for arbitrary parser-producible elements, `decodeReq`/`decodeResp`/
   `decodeData`/`decodeHeaders` either return a value or throw
-  `CodecError`/`TypeError` — never an internal `TypeError`/`RangeError`,
+  `CodecError`/`TypeError`, never an internal `TypeError`/`RangeError` and
   never a hang. Also fuzzes base64 (only `SyntaxError` escapes), the URL
   parser (only `TypeError`), and `ChunkReassembler` under random push
   sequences.
-- **`test/integration/adversarial.test.ts`** points a hostile peer at every
-  bound in the security model — malformed `<req>`, chunk floods for unknown
+- `test/integration/adversarial.test.ts` points a hostile peer at every
+  bound in the security model (malformed `<req>`, chunk floods for unknown
   streams, oversized streamed request bodies, unsolicited/absurd/duplicate
   IBB opens, `<data>` for unknown sids, seq desync, and a peer that stops
-  acking — and asserts each attack yields a protocol error (or is silently
+  acking) and asserts each attack yields a protocol error (or is silently
   dropped), the victim survives, and a legitimate request still succeeds.
   This suite drove one fix: IBB block sends are now bounded by the idle
-  timeout, not the session's full IQ timeout.
+  timeout rather than the session's full IQ timeout.
 
 ## Benchmarks & memory
 
-- **`npm run bench`** (vitest bench, `test/bench/transports.bench.ts`)
+- `npm run bench` (vitest bench, `test/bench/transports.bench.ts`)
   measures per-transport round-trip throughput over the mock pair at 64 KiB
   and 1 MiB. Numbers are comparative, not absolute (microtask delivery, no
-  real socket) — useful for spotting framing-overhead regressions and
-  tuning chunk/block sizes. As expected the transports cluster closely; IBB
-  and sipub pay a small per-block IQ-round-trip cost that the
+  real socket); they are useful for spotting framing-overhead regressions
+  and tuning chunk/block sizes. As expected the transports cluster closely;
+  IBB and sipub pay a small per-block IQ-round-trip cost that the
   fire-and-forget chunked/message transports avoid.
-- **`test/bench/s5b.bench.ts`** (same `npm run bench` run) is the S5B
+- `test/bench/s5b.bench.ts` (same `npm run bench` run) is the S5B
   measurement the mock pair cannot provide: sipub (XEP-0065) and Jingle
-  (XEP-0260) bodies cross a *real* loopback TCP socket — the server
-  self-hosts a direct streamhost, the client dials it — against an IBB
+  (XEP-0260) bodies cross a *real* loopback TCP socket (the server
+  self-hosts a direct streamhost, the client dials it) against an IBB
   baseline at 64 KiB, 1 MiB and 8 MiB. The comparison is deliberately biased
-  against S5B (the IBB baseline's stanzas never touch a socket, the S5B
-  paths pay TCP connect + SOCKS5 handshake + negotiation IQs per request),
-  which makes the result an honest floor: ~1.3–2× IBB at 64 KiB, ~12× at
-  1 MiB, ~25× at 8 MiB on loopback (the shape holds run to run; the exact
-  digits do not). Every S5B round trip asserts *inside the
+  against S5B (the IBB baseline's stanzas never touch a socket, while the
+  S5B paths pay TCP connect + SOCKS5 handshake + negotiation IQs per
+  request), which makes the result an honest floor: ~1.3 to 2× IBB at
+  64 KiB, ~12× at 1 MiB, ~25× at 8 MiB on loopback (the shape holds run to
+  run; the exact digits do not). Every S5B round trip asserts *inside the
   measured function* that it opened a negotiated socket (a throw in
   tinybench's teardown hook is never awaited, so only there does a failed
   guard actually error the case), so a silent IBB fallback cannot publish
   IBB numbers under an S5B label. The wire-clocked run against Prosody is
   the next bullet. This benchmark's first run caught a real defect: both
-  stream senders re-copied the buffered remainder once per block —
-  O(body²/blockSize), 5.5 s for an 8 MiB IBB body — fixed by `BlockBuffer`
-  (`src/util/bytes.ts`, pinned by `test/unit/bytes.test.ts`), which brought
-  it to 0.69 s and linear scaling.
-- **`npm run bench:prosody`** (vitest bench, `test/e2e/transports.prosody.bench.ts`)
+  stream senders re-copied the buffered remainder once per block,
+  O(body²/blockSize), 5.5 s for an 8 MiB IBB body. `BlockBuffer`
+  (`src/util/bytes.ts`, pinned by `test/unit/bytes.test.ts`) fixed it,
+  bringing the time to 0.69 s with linear scaling.
+- `npm run bench:prosody` (vitest bench, `test/e2e/transports.prosody.bench.ts`)
   is the wire-clocked run: an `@xmpp/client` user fetching from an
   `@xmpp/component` gateway through a real Dockerized Prosody (the e2e
-  globalSetup owns the container and takes it down afterwards — `npm run
+  globalSetup owns the container and takes it down afterwards; `npm run
   demo` brings it back; anything else holding the component domain, like a
-  running demo gateway, must be stopped first). The wire changes the story
-  the mock pair cannot tell: S5B is nearly size-independent (~0.1 s at
-  64 KiB and at 8 MiB alike — negotiation cost; the body bypasses Prosody
-  over direct TCP, which is XEP-0065's point), while the server-relayed
-  transports scale with size — at 8 MiB, sipub+S5B measured ~40× IBB and
+  running demo gateway, must be stopped first). The wire shows what the mock
+  pair cannot: S5B is nearly size-independent (~0.1 s at 64 KiB and at 8 MiB
+  alike, since the cost is negotiation and the body bypasses Prosody over
+  direct TCP, which is XEP-0065's point), while the server-relayed
+  transports scale with size. At 8 MiB, sipub+S5B measured ~40× IBB and
   ~19× chunkedBase64, and IBB itself runs ~5× slower than its mock-pair
   number (a real client↔server↔component round trip per 4 KiB block).
   chunkedBase64 still wins at 64 KiB, where S5B's setup dominates. Each
   S5B round trip asserts in-function that it opened a negotiated socket
   (`throws: true`), like the loopback bench.
-- **`node --expose-gc scripts/memcheck.mjs`** (after `npm run build`) proves
-  IBB streaming is **O(block), not O(body)**: it streams 1 MiB and 16 MiB
+- `node --expose-gc scripts/memcheck.mjs` (after `npm run build`) proves
+  IBB streaming is O(block), not O(body): it streams 1 MiB and 16 MiB
   bodies while sampling *live* (post-GC) heap, and fails if retention scales
-  with body size. IBB is the memory-bounded transport by design — its
-  per-block acks apply real backpressure — so it is what the audit
+  with body size. IBB is the memory-bounded transport by design (its
+  per-block acks apply real backpressure), so it is what the audit
   exercises; chunkedBase64 has no protocol acks and is bounded instead by
   the receiver's `maxBufferedBytes` cap.
 
 The Electron shell's protocol handler is tested the same way, in
 `test/integration/electron-protocol.test.ts`: it is a `Request` → `Response`
-function on purpose, so the session pair covers the URL encoding round trip, the
-CSP a page cannot loosen, header/body forwarding and the error pages — with no
-Electron and no display involved. The windowed shell is verified by hand under
-Xvfb (see [electron-shell.md](electron-shell.md)); no CI job has a display.
+function on purpose, so the session pair covers the URL encoding round trip,
+the CSP a page cannot loosen, header/body forwarding and the error pages,
+with no Electron and no display involved. The windowed shell is verified by
+hand under Xvfb (see [electron-shell.md](electron-shell.md)); no CI job has a
+display.
 
 ## Browser smoke test (`npm run smoke`)
 
-`scripts/smoke-browser.mjs` drives the **built** extension page in real Chromium
-(Playwright) against `scripts/demo-gateway.mjs` over real XMPP, serving the page
-from `http://localhost` so it runs in a secure context like an extension origin
-(the Cache API and storage then behave identically). It starts the gateway
-itself; the only prerequisites are the E2E Prosody being up with `alice`
+`scripts/smoke-browser.mjs` drives the built extension page in real Chromium
+(Playwright) against `scripts/demo-gateway.mjs` over real XMPP, serving the
+page from `http://localhost` so it runs in a secure context like an extension
+origin (the Cache API and storage then behave identically). It starts the
+gateway itself; the only prerequisites are the E2E Prosody being up with `alice`
 registered, plus `npm run build && npm --prefix examples/webext run build`.
 
-It exists because the browser-mode suites cover each module in isolation while
-nothing reaches the wiring in `app.ts` — tab switching, per-tab history, the
-chrome staying in sync with the active tab. It earned that place immediately by
-catching a bug the unit tests could not: after a POST the address bar reverted
-to the form's page, because only `navigate()` updated the tab's URL. Twenty
-checks run, and any browser console error fails the run (with one filter:
-Playwright injects utility scripts into every frame, and our sandbox blocks them
-in the scriptless `srcdoc` documents — that is the sandbox working).
+It exists because the browser-mode suites cover each module in isolation
+while nothing reaches the wiring in `app.ts` (tab switching, per-tab history,
+the chrome staying in sync with the active tab). It earned that place
+immediately by catching a bug the unit tests could not: after a POST the
+address bar reverted to the form's page, because only `navigate()` updated
+the tab's URL. Twenty checks run, and any browser console error fails the run
+(with one filter: Playwright injects utility scripts into every frame, and
+our sandbox blocks them in the scriptless `srcdoc` documents, which is the
+sandbox working).
 
-Not in CI: no job combines Docker and Playwright today. It is the fastest way to
-sanity-check the extension by hand after touching the render or navigation
+Not in CI: no job combines Docker and Playwright today. It is the fastest way
+to sanity-check the extension by hand after touching the render or navigation
 paths.
 
 ## Dillo smoke test (`npm run smoke:dillo`)
@@ -304,14 +307,14 @@ paths.
 `scripts/smoke-dillo.mjs` is the Dillo plugin's real-world twin of the vitest
 suite in `test/integration-node/dillo-dpi.test.ts` (which drives the dpip
 framing over the in-memory session pair). It installs the built plugin into a
-throwaway `$HOME`, starts a **real dpid**, and speaks to it exactly as Dillo
-does — `check_server` for `proto.httpx`, connect to the port dpid answers
-with, `auth`, `open_url` — against `scripts/demo-gateway.mjs` over the E2E
-Prosody. That covers what only dpid can: the `dpidrc` line routing the scheme,
-the launcher exec'ing under dpid's environment, and the plugin inheriting the
-listening socket on fd 0. Where `dillo` and `xvfb-run` exist it then launches
-Dillo itself under Xvfb, asserts from the plugin's log that Dillo requested the
-page and then its image on its own, and writes
+throwaway `$HOME`, starts a real dpid, and speaks to it exactly as Dillo
+does (`check_server` for `proto.httpx`, connect to the port dpid answers
+with, `auth`, `open_url`) against `scripts/demo-gateway.mjs` over the E2E
+Prosody. That covers what only dpid can: the `dpidrc` line routing the
+scheme, the launcher exec'ing under dpid's environment, and the plugin
+inheriting the listening socket on fd 0. Where `dillo` and `xvfb-run` exist
+it then launches Dillo itself under Xvfb, asserts from the plugin's log that
+Dillo requested the page and then its image on its own, and writes
 `examples/dillo/dist/smoke-dillo.png`. Prereqs: `npm run demo` (Prosody +
 alice), and `npm --prefix examples/dillo install && npm --prefix examples/dillo
 run build`. Not in CI, like the browser smoke test: it needs Docker and a
@@ -320,8 +323,8 @@ Dillo install.
 ## Manual demo path
 
 `scripts/demo-gateway.mjs` connects to the E2E Prosody's component and
-serves a small multi-page site (pages, relative links, a PNG) over httpx —
-browsable with the WebExtension, or scriptable with `httpxFetch`. See
+serves a small multi-page site (pages, relative links, a PNG) over httpx,
+browsable with the WebExtension or scriptable with `httpxFetch`. See
 [`examples/webext/README.md`](../examples/webext/README.md) for the
 step-by-step.
 

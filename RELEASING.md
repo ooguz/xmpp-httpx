@@ -1,4 +1,4 @@
-# Releasing — owner runbook
+# Releasing: owner runbook
 
 Two actions create public surfaces and therefore need the owner's hands
 (and credentials). Everything below them is already prepared and verified.
@@ -20,7 +20,7 @@ What activates on push: the four CI jobs (lint/typecheck/build; Node
 20/22/24 tests; headless-Chromium tests; nightly Prosody E2E) plus the
 `api-docs` job deploying typedoc to <https://ooguz.github.io/xmpp-httpx/>.
 The README badges and package.json `repository`/`homepage`/`bugs` already
-point at `ooguz/xmpp-httpx` — if you pick another name/org, update those
+point at `ooguz/xmpp-httpx`. If you pick another name/org, update those
 first (`README.md`, `package.json`, `typedoc.json`, `docs/ROADMAP.md`,
 `docs/xep-0332-feedback.md`).
 
@@ -37,7 +37,7 @@ by default. Consider `npm publish --provenance` once publishing from CI.
 
 ## 3. Announce (optional, when ready)
 
-- Post `docs/xep-0332-feedback.md` to <standards@xmpp.org> — it is written
+- Post `docs/xep-0332-feedback.md` to <standards@xmpp.org>. It is written
   as a ready-to-send implementation-experience report proposing XEP-0332
   return to Experimental with fixes.
 - Add the implementation to the XMPP software listing / XEP-0332 wiki notes.
