@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Dillo plugin: `dpi:/httpx/`.** The plugin serves its own page: signed-in
+  JID, configuration path, a settings form that writes `~/.dillo/httpx.json`
+  (mode 600, atomic replace) and drops the session so the next page signs in
+  with the new account, and a sign-out link. The form is a GET form (Dillo
+  hands a plugin only a URL), so the page says plainly that the values travel
+  in the URL; an empty password field keeps the stored one and `dpi:` queries
+  are never logged. The smoke script asks dpid for the `httpx` service name
+  as Dillo does for `dpi:` URLs and checks the page comes from the same
+  process.
 - **Browser suites run in Firefox too.** The vitest `browser` project now has
   a Firefox (Gecko) instance next to Chromium, so every browser-only test
   (CSS sanitizer, render pipeline, forms, cache, drawer, tabs, progress)

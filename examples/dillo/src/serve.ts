@@ -1,8 +1,9 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Duplex } from "node:stream";
-import { HttpxError, parseHttpxUrl } from "xmpp-httpx";
+import { HttpxError } from "xmpp-httpx";
 import { buildTag, TagBuffer, type DpipTag } from "./dpip.js";
+import { loggableUrl } from "./settings.js";
 
 /**
  * One Dillo connection, start to finish.
@@ -136,13 +137,14 @@ async function respond(
 
   let response: Response;
   try {
-    parseHttpxUrl(url); // a URL Dillo routed here that is not httpx is a 400, not a crash
     response = await options.fetch(url, context);
   } catch (err) {
+    // A URL Dillo routed here that fetch cannot place (parseHttpxUrl throws
+    // a TypeError) is a 400 page, not a crash.
     response = errorResponse(url, err);
   }
 
-  log(`${url} → ${response.status} (${Date.now() - started}ms)`);
+  log(`${loggableUrl(url)} → ${response.status} (${Date.now() - started}ms)`);
   if (socket.destroyed) return;
 
   socket.write(buildTag({ cmd: "start_send_page", url }));
@@ -173,7 +175,7 @@ export function formatHead(response: Response): string {
 /** A failure the user can read: status from the error, message escaped. */
 export function errorResponse(url: string, err: unknown): Response {
   let status = 502;
-  let title = `Could not load ${url}`;
+  let title = `Could not load ${loggableUrl(url)}`;
   let hint: string | undefined;
   if (err instanceof DpiSetupError) {
     status = 503;

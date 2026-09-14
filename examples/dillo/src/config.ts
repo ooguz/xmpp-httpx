@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { DpiSetupError } from "./serve.js";
 
 /**
@@ -72,6 +72,28 @@ export async function loadConfig(path: string): Promise<DpiConfig> {
   }
 
   return { jid, password, service, resource, timeoutMs };
+}
+
+/**
+ * Write the config the way it is read: a JSON object, mode 600, replaced
+ * atomically so a crash mid-write cannot leave a truncated file behind.
+ */
+export async function saveConfig(path: string, config: DpiConfig): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const json = JSON.stringify(
+    {
+      jid: config.jid,
+      password: config.password,
+      ...(config.service !== undefined ? { service: config.service } : {}),
+      resource: config.resource,
+      timeoutMs: config.timeoutMs,
+    },
+    null,
+    2,
+  );
+  const tmp = `${path}.tmp`;
+  await writeFile(tmp, `${json}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(tmp, path);
 }
 
 /**

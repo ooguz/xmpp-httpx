@@ -75,7 +75,13 @@ const gateway = spawn(process.execPath, [join(ROOT, "scripts/demo-gateway.mjs")]
   stdio: ["ignore", "pipe", "inherit"],
 });
 children.push(gateway);
-await waitFor(gateway.stdout, /\[gateway\] serving/, "demo gateway");
+try {
+  await waitFor(gateway.stdout, /\[gateway\] serving/, "demo gateway");
+} catch (err) {
+  check("demo gateway started (is the E2E Prosody up? `npm run demo`)", false, String(err));
+  for (const child of children) child.kill();
+  process.exit(1);
+}
 
 const dpid = spawn("dpid", [], { env, stdio: ["ignore", "pipe", "pipe"] });
 children.push(dpid);
@@ -94,11 +100,12 @@ check("dpid wrote dpid_comm_keys", existsSync(keysFile));
 const [dpidPort, secret] = readFileSync(keysFile, "utf8").trim().split(" ");
 
 // --- talk like Dillo ----------------------------------------------------------------
-async function openUrl(url) {
-  // 1. ask dpid where the plugin is (starting it if need be)
+async function openUrl(url, server = "proto.httpx") {
+  // 1. ask dpid where the plugin is (starting it if need be). Dillo asks for
+  //    "proto.httpx" for httpx:// URLs and for "httpx" for dpi:/httpx/ ones.
   const reply = await exchange(Number(dpidPort), [
     `<cmd='auth' msg='${secret}' '>`,
-    `<cmd='check_server' msg='proto.httpx' '>`,
+    `<cmd='check_server' msg='${server}' '>`,
   ]);
   const port = /<cmd='send_data' msg='(\d+)' '>/.exec(reply.text)?.[1];
   if (!port) throw new Error(`dpid did not hand over a port: ${reply.text}`);
@@ -139,6 +146,11 @@ try {
   check("404 passes through", missing.head.startsWith("HTTP/1.1 404"), missing.head.split("\r\n")[0]);
 
   check("plugin signed in once", (pluginLog.match(/signed in as alice@localhost/g) ?? []).length === 1);
+
+  const settings = await openUrl("dpi:/httpx/", "httpx");
+  check("dpi:/httpx/ status page", settings.head.startsWith("HTTP/1.1 200 OK"), settings.head.split("\r\n")[0]);
+  check("status page shows the signed-in JID", settings.body.toString().includes("Signed in as <b>alice@localhost/dillo-smoke</b>"));
+  check("same plugin process served both names", (pluginLog.match(/serving on the socket/g) ?? []).length === 1);
 
   // --- Dillo itself, if it can run headless here -----------------------------------
   if (which("dillo") && which("xvfb-run")) {

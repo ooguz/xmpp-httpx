@@ -3,8 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { client, type XmppEntity } from "@xmpp/client";
 import { httpxFetch, type XmppSession } from "xmpp-httpx";
-import { configPath, createKeyFileAuth, loadConfig, type DpiConfig } from "./config.js";
+import { configPath, createKeyFileAuth, loadConfig, saveConfig, type DpiConfig } from "./config.js";
 import { DpiSetupError, serveConnection } from "./serve.js";
+import { handleLocal, isLocalUrl, type PluginState } from "./settings.js";
 
 /**
  * The plugin process — a *server* dpi in Dillo's terms.
@@ -19,6 +20,9 @@ import { DpiSetupError, serveConnection } from "./serve.js";
  *
  * `HTTPX_DPI_LISTEN=host:port` listens there instead of on fd 0 — for the
  * smoke script and for running the plugin by hand outside dpid.
+ *
+ * `dpi:/httpx/` (Dillo's own URL form for a plugin's pages) is served here
+ * too: a status page and a settings form, see settings.ts.
  */
 
 const log = (line: string): void => {
@@ -83,10 +87,44 @@ async function ensureSession(status: (message: string) => void): Promise<XmppSes
   return connecting;
 }
 
+/** Forget the live session; the next request signs in with the current file. */
+async function dropSession(): Promise<void> {
+  const old = entity;
+  entity = null;
+  session = null;
+  config = null;
+  if (old !== null) await old.stop().catch(() => undefined);
+}
+
+async function pluginState(): Promise<PluginState> {
+  const state: PluginState = {
+    signedInAs: entity?.jid?.toString() ?? null,
+    configPath: configFile,
+    config: null,
+    configError: null,
+  };
+  try {
+    state.config = await loadConfig(configFile);
+  } catch (err) {
+    state.configError = err instanceof Error ? err.message : String(err);
+  }
+  return state;
+}
+
 const server: Server = createServer((socket) => {
   void serveConnection(socket, {
     checkAuth: createKeyFileAuth(keyFile),
     fetch: async (url, context) => {
+      if (isLocalUrl(url)) {
+        return handleLocal(url, {
+          state: pluginState,
+          save: async (next) => {
+            await saveConfig(configFile, next);
+            await dropSession();
+          },
+          reconnect: dropSession,
+        });
+      }
       const live = await ensureSession(context.status);
       return httpxFetch(url, { session: live, timeoutMs: config?.timeoutMs ?? 30_000 });
     },
