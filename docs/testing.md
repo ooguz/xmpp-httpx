@@ -10,7 +10,7 @@ suite against a real Prosody.
 | Project | Command | Environment | What runs |
 |---|---|---|---|
 | `node` | `npm test` | Node | `test/unit/**` + `test/integration/**` + `test/integration-node/**` |
-| `browser` | `npm run test:browser` | headless Chromium (Playwright) | the same suites, plus `test/browser/**` |
+| `browser` | `npm run test:browser` | headless Chromium and Firefox (Playwright) | the same suites, plus `test/browser/**`, each file once per engine |
 | `e2e` | `npm run test:e2e` | Node + Docker | `test/e2e/**/*.e2e.test.ts` against live Prosody |
 
 Two directories are single-project by nature. `test/integration-node/` runs
@@ -152,7 +152,8 @@ binding `httpx.localhost` at once get `conflict — Component already connected`
 ## Browser-only suites (`test/browser/`)
 
 The WebExtension's rendering pipeline is security-critical and pure
-browser-API code, so it is tested in real Chromium rather than by hand:
+browser-API code, so it is tested in real Chromium and real Firefox rather
+than by hand:
 
 - `sanitize-css.test.ts`: the CSSOM sanitizer. At-rule allow-listing,
   `url()` resolution and rejection, `expression()`/`behavior` removal,
@@ -334,6 +335,6 @@ step-by-step.
 |---|---|---|
 | `check` | push/PR | lint, typecheck, build |
 | `test` | push/PR | node project on Node 20 / 22 / 24 |
-| `browser` | push/PR | Playwright Chromium, browser project |
+| `browser` | push/PR | Playwright Chromium + Firefox, browser project |
 | `e2e` | nightly cron, manual dispatch, pushes to main | Prosody compose + e2e project |
 | `bench` | manual dispatch | `npm run bench` + `scripts/memcheck.mjs` (informational) |

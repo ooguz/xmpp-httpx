@@ -87,11 +87,11 @@ Ranked. Items 1 to 3 are the reason an external review exists.
    `image-set()`/`src()`-style functional notations, smuggling through
    custom properties and `var()`, allow-listed at-rules containing
    something unexpected (`@font-face src`, `@keyframes` with url()), and
-   engine differentials. The sanitizer runs wherever the page runs, and
-   the automated suites pin Chromium only while Berrak renders in Gecko.
-   A Gecko-vs-Chromium serialization difference already bit this project
-   once (strict PNG CRC handling); the sanitizer deserves the same
-   suspicion.
+   engine differentials. The sanitizer runs wherever the page runs; since
+   2026-09-15 the browser suites run in both Chromium and Firefox (Gecko,
+   the engine Berrak embeds) and pass in both, but a Gecko-vs-Chromium
+   difference already bit this project once (strict PNG CRC handling), so
+   the sanitizer still deserves suspicion beyond what the suites pin.
 3. **Privileged-origin egress and injection.** The extension page itself
    loads nothing remote by design. Favicons are accepted over `httpx:`
    only (a self-review finding: `https:` icons let any page make the
@@ -199,7 +199,6 @@ need.
 
 ## Reporting
 
-The repo is private at the time of writing. Findings go directly to the
-maintainer (repo owner) or, once the repo is public, through GitHub's
-private vulnerability reporting. Please do not open regular issues for
-security findings.
+Findings go through GitHub's private vulnerability reporting on
+`ooguz/xmpp-httpx` (see `SECURITY.md`). Please do not open regular issues
+for security findings.

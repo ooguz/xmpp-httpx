@@ -7,3 +7,5 @@ docs/api/
 # Vitest browser-mode debris: screenshots of failing tests, attachment blobs.
 .vitest-attachments/
 **/__screenshots__/
+# The XSF implementation-experience draft stays local until it is sent.
+docs/xep-0332-feedback.md

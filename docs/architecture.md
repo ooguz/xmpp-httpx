@@ -323,8 +323,8 @@ authenticated by the XMPP server via SASL before any stanza is routed. The
 behind the gateway can trust these the way it would trust a reverse proxy's
 auth headers, provided it only accepts them from the gateway. XEP-0348
 ("Signing Forms") was evaluated and does not map onto httpx request
-authentication; per-request signatures would need a new profile (see
-[xep-0332-feedback.md](xep-0332-feedback.md)).
+authentication; per-request signatures would need a new profile (raised in
+the implementation-experience report for the XSF).
 
 ### Content-Encoding
 

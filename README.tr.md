@@ -20,7 +20,6 @@ Belgeler (İngilizce):
 | [docs/browser-extension.md](docs/browser-extension.md) | Tarayıcı eklentisinin mimarisi: bağlantının nerede durduğu, işleme hattı, sekmeler, manifest stratejisi |
 | [docs/gateway-cli.md](docs/gateway-cli.md) | `xmpp-httpx-gateway`: mevcut bir HTTP sunucusunu elle ya da Docker ile XMPP üzerine taşımak |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sıradaki aşamalar ve işler |
-| [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | XSF standart süreci için uygulama deneyimi notları |
 | [docs/interop.md](docs/interop.md) | Birlikte çalışabilirlik tablosu: denenmiş sunucular, çalışma ortamları, karşı uygulamalar |
 | [examples/webext/README.md](examples/webext/README.md) | Tarayıcı eklentisini derleme/çalıştırma kılavuzu |
 | [CHANGELOG.md](CHANGELOG.md) | Sürüm geçmişi |

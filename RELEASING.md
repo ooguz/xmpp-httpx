@@ -24,8 +24,7 @@ What activates on push: the four CI jobs (lint/typecheck/build; Node
 `api-docs` job deploying typedoc to <https://ooguz.github.io/xmpp-httpx/>.
 The README badges and package.json `repository`/`homepage`/`bugs` already
 point at `ooguz/xmpp-httpx`. If you pick another name/org, update those
-first (`README.md`, `package.json`, `typedoc.json`, `docs/ROADMAP.md`,
-`docs/xep-0332-feedback.md`).
+first (`README.md`, `package.json`, `typedoc.json`, `docs/ROADMAP.md`).
 
 ## 2. Publish to npm
 
@@ -40,9 +39,10 @@ by default. Consider `npm publish --provenance` once publishing from CI.
 
 ## 3. Announce (optional, when ready)
 
-- Post `docs/xep-0332-feedback.md` to <standards@xmpp.org>. It is written
-  as a ready-to-send implementation-experience report proposing XEP-0332
-  return to Experimental with fixes.
+- Post the implementation-experience report to <standards@xmpp.org>. The
+  draft lives at `docs/xep-0332-feedback.md` in the owner's checkout only
+  (gitignored, not in the public repo); it proposes XEP-0332 return to
+  Experimental with fixes.
 - Add the implementation to the XMPP software listing / XEP-0332 wiki notes.
 
 ## Release checklist (future versions)

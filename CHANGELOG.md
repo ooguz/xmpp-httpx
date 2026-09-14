@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Browser suites run in Firefox too.** The vitest `browser` project now has
+  a Firefox (Gecko) instance next to Chromium, so every browser-only test
+  (CSS sanitizer, render pipeline, forms, cache, drawer, tabs, progress)
+  runs once per engine. Gecko is what the Android app embeds, and a
+  Chromium-vs-Gecko difference had already bitten the project once (PNG CRC
+  strictness); the first dual-engine run passed everywhere, 886 tests.
+- **`SECURITY.md`** and GitHub private vulnerability reporting, now that the
+  repository is public; the reviewer dossier's reporting section points
+  there.
+- The XSF implementation-experience draft is kept in the owner's checkout
+  only (gitignored) until it is sent; links to it were replaced with prose.
 - **Dillo plugin** (`examples/dillo/`): `httpx://` in Dillo through its plugin
   interface. A *server dpi* — dpid starts it once on the first request with
   the listening socket on fd 0, and one XMPP session stays signed in across

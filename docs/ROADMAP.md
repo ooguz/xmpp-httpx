@@ -32,8 +32,10 @@ implementations to revive its standards process; be that implementation.
 - [x] **API reference site** (M): typedoc (`npm run docs:api`) verified
   locally; the `api-docs` CI job deploys to GitHub Pages on pushes to main
   once the repo exists.
-- [x] **XSF / standards feedback** (M): [xep-0332-feedback.md](xep-0332-feedback.md)
-  drafted and ready to post to standards@xmpp.org.
+- [x] **XSF / standards feedback** (M): the implementation-experience report
+  is drafted and ready to post to standards@xmpp.org. It is kept in the
+  owner's checkout only (`docs/xep-0332-feedback.md`, gitignored) until it is
+  sent.
 - [x] **Interop matrix page** (S): [interop.md](interop.md).
 
 Acceptance: package installable from npm; docs site live; feedback thread

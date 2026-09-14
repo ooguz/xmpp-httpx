@@ -22,7 +22,6 @@ Documentation:
 | [docs/dillo-plugin.md](docs/dillo-plugin.md) | The Dillo plugin: `httpx://` as a dpi, and why Dillo is the easiest host of the three |
 | [docs/gateway-cli.md](docs/gateway-cli.md) | `xmpp-httpx-gateway`: put an existing HTTP origin on XMPP, by hand or in Docker |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Next phases and tasks (release, hardening, extension v2, gateway product) |
-| [docs/xep-0332-feedback.md](docs/xep-0332-feedback.md) | Implementation-experience write-up for the XSF standards process |
 | [docs/interop.md](docs/interop.md) | Interoperability matrix: tested servers, runtimes, peer implementations |
 | [examples/webext/README.md](examples/webext/README.md) | Build/run guide for the browser extension |
 | [examples/dillo/README.md](examples/dillo/README.md) | Install guide for the Dillo plugin |
