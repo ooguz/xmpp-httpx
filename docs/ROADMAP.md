@@ -25,11 +25,10 @@ implementations to revive its standards process; be that implementation.
 - [ ] **Publish `xmpp-httpx@0.8.0` to npm** (S): fully prepared (metadata,
   `prepublishOnly` gate, pack verified, v0.8.0 tagged). Owner action:
   `npm login && npm publish`, see [RELEASING.md](../RELEASING.md).
-- [~] **Git remote + CI activation** (S): pushed to `ooguz/xmpp-httpx`
-  (private) 2026-08-29, `main` + `v0.7.0` tag; CI runs on pushes. The one
-  remainder: GitHub Pages (the `api-docs` job's target) is not available on
-  a private repo's free plan, so either make the repo public or park that
-  job.
+- [x] **Git remote + CI activation** (S): pushed to `ooguz/xmpp-httpx`
+  2026-08-29 (private at first), `main` plus the `v0.7.0` and `v0.8.0` tags;
+  CI runs on pushes. Made public on 2026-09-15, with GitHub Pages enabled
+  from the workflow so the `api-docs` job has a target.
 - [x] **API reference site** (M): typedoc (`npm run docs:api`) verified
   locally; the `api-docs` CI job deploys to GitHub Pages on pushes to main
   once the repo exists.

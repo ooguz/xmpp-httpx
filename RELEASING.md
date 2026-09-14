@@ -5,6 +5,9 @@ Two actions create public surfaces and therefore need the owner's hands
 
 ## 1. Create the GitHub repository and push (one time)
 
+Done: `ooguz/xmpp-httpx` exists, is public since 2026-09-15, and has GitHub
+Pages enabled from the workflow. Kept for reference:
+
 ```sh
 # From the repo root; gh is already authenticated as ooguz.
 gh repo create xmpp-httpx --public \
