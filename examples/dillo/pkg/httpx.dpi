@@ -1,0 +1,34 @@
+#!/bin/sh
+# httpx.dpi: Dillo plugin launcher for xmpp-httpx.
+#
+# dpid execs this file with the listening socket already on fd 0 and with
+# Dillo's environment, whose PATH may not include the node you use in a
+# shell (nvm, for one). So the launcher looks for node itself, then runs the
+# bundled plugin. Override either with HTTPX_DPI_NODE / HTTPX_DPI_LIB.
+LIB="${HTTPX_DPI_LIB:-${XDG_DATA_HOME:-$HOME/.local/share}/httpx-dpi/httpx.js}"
+
+NODE="${HTTPX_DPI_NODE:-}"
+[ -z "$NODE" ] && NODE=$(command -v node 2>/dev/null || true)
+if [ -z "$NODE" ]; then
+  # The newest nvm-managed node, if any (sort -V orders v9 before v24).
+  NODE=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)
+fi
+if [ -z "$NODE" ]; then
+  for candidate in /usr/local/bin/node /opt/homebrew/bin/node /usr/bin/node; do
+    [ -x "$candidate" ] && NODE=$candidate && break
+  done
+fi
+if [ -z "$NODE" ]; then
+  echo "[httpx.dpi] node not found; install Node.js 20 or newer, or set HTTPX_DPI_NODE" >&2
+  exit 1
+fi
+if ! "$NODE" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' 2>/dev/null; then
+  echo "[httpx.dpi] $NODE is older than Node 20; set HTTPX_DPI_NODE to a newer one" >&2
+  exit 1
+fi
+if [ ! -f "$LIB" ]; then
+  echo "[httpx.dpi] plugin code not found at $LIB; reinstall, or set HTTPX_DPI_LIB" >&2
+  exit 1
+fi
+
+exec "$NODE" "$LIB"

@@ -1,5 +1,6 @@
-// End-to-end smoke test of the Dillo plugin: a real dpid launches the built
-// httpx.dpi under a throwaway $HOME, and this script speaks to both exactly
+// End-to-end smoke test of the Dillo plugin: the *packaged* plugin (the
+// tarball `npm run package` builds) is installed by its own install.sh into a
+// throwaway $HOME, a real dpid launches it, and this script speaks to both exactly
 // the way Dillo does (src/IO/dpi.c) — check_server → the plugin's port → auth
 // → open_url — against the demo gateway over real XMPP. Then, when `dillo`
 // and `xvfb-run` exist, Dillo itself loads the page under Xvfb and a
@@ -12,11 +13,11 @@
 //
 // Prereqs:
 //   npm run demo                       Prosody up, alice registered, library built
-//   npm --prefix examples/dillo install && npm --prefix examples/dillo run build
+//   npm --prefix examples/dillo install && npm --prefix examples/dillo run package
 // Run: npm run smoke:dillo
 import { spawn, spawnSync } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,8 +36,14 @@ const check = (name, ok, detail = "") => {
 };
 const which = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`]).status === 0;
 
-if (!existsSync(join(EXAMPLE, "dist/main.js"))) {
-  console.error("build the plugin first: npm --prefix examples/dillo install && npm --prefix examples/dillo run build");
+const tarball = existsSync(join(EXAMPLE, "dist/artifacts"))
+  ? readdirSync(join(EXAMPLE, "dist/artifacts"))
+      .filter((f) => /^httpx-dillo-dpi-.*\.tar\.gz$/.test(f))
+      .sort()
+      .at(-1)
+  : undefined;
+if (tarball === undefined) {
+  console.error("package the plugin first: npm --prefix examples/dillo install && npm --prefix examples/dillo run package");
   process.exit(2);
 }
 if (!which("dpid")) {
@@ -51,8 +58,16 @@ mkdirSync(join(HOME, ".dillo"), { recursive: true });
 // Dillo itself reads dillorc from here too; an empty one keeps its defaults.
 writeFileSync(join(HOME, ".dillo/dillorc"), "");
 
-const install = spawnSync("sh", [join(EXAMPLE, "install.sh")], { env, encoding: "utf8" });
-check("install.sh wrote the launcher and dpidrc", install.status === 0, install.stderr);
+// Unpack the tarball somewhere that is not the checkout and install from there,
+// the way a user would.
+const unpacked = mkdtempSync(join(tmpdir(), "httpx-dillo-pkg-"));
+const untar = spawnSync("tar", ["-xzf", join(EXAMPLE, "dist/artifacts", tarball), "-C", unpacked], { encoding: "utf8" });
+check(`unpacked ${tarball}`, untar.status === 0, untar.stderr);
+const pkgDir = join(unpacked, readdirSync(unpacked)[0] ?? "");
+const install = spawnSync("sh", [join(pkgDir, "install.sh")], { env, encoding: "utf8" });
+check("install.sh wrote the launcher, the bundle and dpidrc", install.status === 0, install.stderr);
+check("bundle landed under the throwaway $HOME", existsSync(join(HOME, ".local/share/httpx-dpi/httpx.js")));
+check("launcher is not tied to the checkout", !readFileSync(join(HOME, ".dillo/dpi/httpx/httpx.dpi"), "utf8").includes(ROOT));
 writeFileSync(
   join(HOME, ".dillo/httpx.json"),
   JSON.stringify(
@@ -182,6 +197,7 @@ try {
   await sleep(500);
   for (const child of children) child.kill();
   rmSync(HOME, { recursive: true, force: true });
+  rmSync(unpacked, { recursive: true, force: true });
 }
 
 console.log(failures === 0 ? "\nall checks passed" : `\n${failures} check(s) failed`);

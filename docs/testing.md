@@ -316,9 +316,9 @@ scheme, the launcher exec'ing under dpid's environment, and the plugin
 inheriting the listening socket on fd 0. Where `dillo` and `xvfb-run` exist
 it then launches Dillo itself under Xvfb, asserts from the plugin's log that
 Dillo requested the page and then its image on its own, and writes
-`examples/dillo/dist/smoke-dillo.png`. Prereqs: `npm run demo` (Prosody +
-alice), and `npm --prefix examples/dillo install && npm --prefix examples/dillo
-run build`. Not in CI, like the browser smoke test: it needs Docker and a
+`examples/dillo/dist/smoke-dillo.png`. It installs from the tarball `npm run package` builds, as a user would.
+Prereqs: `npm run demo` (Prosody + alice), and `npm --prefix examples/dillo
+install && npm --prefix examples/dillo run package`. Not in CI, like the browser smoke test: it needs Docker and a
 Dillo install.
 
 ## Manual demo path

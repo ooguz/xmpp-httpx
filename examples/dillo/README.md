@@ -14,16 +14,25 @@ protocol has not changed between them.
 
 ```sh
 npm install                # links xmpp-httpx from ../..
-npm run install:dillo      # builds, then writes the three files below
+npm run install:dillo      # packages, then runs the package's install.sh
 ```
 
-`install.sh` puts, under `~/.dillo/`:
+Or, without a checkout, unpack `httpx-dillo-dpi-<version>.tar.gz` (built by
+`npm run package` into `dist/artifacts/`) and run `sh install.sh` inside it.
+The package is `install.sh`, the launcher `httpx.dpi`, the plugin bundled
+into one file by esbuild (`lib/httpx.js`, about 250 KiB), the example
+config, and `LICENSE` plus a `LICENSES.txt` assembled from the packages the
+bundle actually contains. Its own README covers a user who never sees this
+repository (`pkg/README.md` here).
+
+`install.sh` puts:
 
 | file | what for |
 |---|---|
-| `dpi/httpx/httpx.dpi` | the program dpid execs: a two-line launcher that runs `dist/main.js` with the absolute path of your `node`, because dpid inherits Dillo's PATH rather than your shell's |
-| `dpidrc` | `proto.httpx=httpx/httpx.dpi`, which is how the scheme reaches the plugin; created from the system file if you had none |
-| `httpx.json` | your account (copied from `httpx.json.example` if missing) |
+| `~/.local/share/httpx-dpi/httpx.js` | the plugin (`$XDG_DATA_HOME` is honored) |
+| `~/.dillo/dpi/httpx/httpx.dpi` | the launcher dpid execs. It finds `node` at run time (PATH, then the newest under `~/.nvm`, then the usual system places; `HTTPX_DPI_NODE` overrides) and refuses anything older than Node 20, because dpid inherits Dillo's PATH rather than your shell's |
+| `~/.dillo/dpidrc` | `proto.httpx=httpx/httpx.dpi`, which is how the scheme reaches the plugin; created from the system file if you had none |
+| `~/.dillo/httpx.json` | your account (copied from `httpx.json.example` if missing) |
 
 Then open `dpi:/httpx/` in Dillo: a status page with a settings form that
 writes `~/.dillo/httpx.json` for you. Or edit the file by hand:
@@ -55,7 +64,9 @@ right there.
 Open `httpx://web.example.org/` in Dillo. The first load signs in (the status
 bar says so); every load after that is one IQ round-trip.
 
-`npm run uninstall:dillo` removes the launcher and the dpidrc line.
+`npm run uninstall:dillo` (or the package's `sh install.sh --uninstall`)
+removes the launcher, the bundle and the dpidrc line, and leaves
+`httpx.json` in place.
 
 ## Against the repo's demo site
 
@@ -101,10 +112,11 @@ httpx://web@httpx.localhost/
 
 ```sh
 cd ../.. && npm test -- dillo         # the framing, over the in-memory pair
-npm run smoke:dillo                    # real dpid, real Dillo under Xvfb
+npm run smoke:dillo                    # the tarball, real dpid, real Dillo under Xvfb
 ```
 
-The smoke script installs into a throwaway `$HOME`, starts a real `dpid`,
+The smoke script unpacks the tarball, runs its `install.sh` into a throwaway
+`$HOME` (checking the launcher carries no path into the checkout), starts a real `dpid`,
 speaks to it exactly as Dillo does, then launches Dillo under Xvfb against
 the demo gateway and saves `dist/smoke-dillo.png`. Verified this way with
 Dillo 3.0.5 and dpid 3.2.0: the page and its image both travel through the

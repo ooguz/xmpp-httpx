@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Dillo plugin packaged.** `npm run package` in `examples/dillo/` builds
+  `httpx-dillo-dpi-<version>.tar.gz`: the plugin bundled into one file by
+  esbuild, a launcher that finds Node 20+ at run time (PATH, `~/.nvm`, system
+  places; `HTTPX_DPI_NODE` overrides), an `install.sh` that needs nothing
+  outside the tarball, the example config, and `LICENSE` plus a
+  `LICENSES.txt` generated from what the bundle actually contains. The
+  checkout-bound `install.sh` is gone; `npm run install:dillo` packages and
+  installs. The smoke test installs from the tarball and checks the launcher
+  carries no path into the checkout; CI builds the package on every push.
 - **Dillo plugin: `dpi:/httpx/`.** The plugin serves its own page: signed-in
   JID, configuration path, a settings form that writes `~/.dillo/httpx.json`
   (mode 600, atomic replace) and drops the session so the next page signs in

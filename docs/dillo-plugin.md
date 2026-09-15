@@ -123,11 +123,24 @@ stylesheet. Run on 2026-09-12 with Dillo 3.0.5 and dpid 3.2.0.
   identity. That is the same standing as any scheme handler, and the same
   accepted risk the Electron shell and the OS-handler note document.
 
-## Not done here
+## Packaging
 
-- Packaging. The launcher bakes in the absolute paths of `node` and the
-  checkout; a distributable plugin would bundle the code and pick up node
-  from a known place. `install.sh` is the honest version for now.
+`npm run package` (`examples/dillo/scripts/package.mjs`) produces
+`httpx-dillo-dpi-<version>.tar.gz`: the plugin bundled into one file by
+esbuild (ESM, Node 20 target, `ws`'s optional native accelerators left
+external), a launcher, an installer, the example config, the AGPL text and
+a `LICENSES.txt` assembled from esbuild's metafile, so it lists exactly the
+packages that went into the bundle. The launcher finds `node` at run time
+(PATH, then the newest under `~/.nvm`, then the usual system places) and
+refuses anything older than Node 20, because dpid execs it with Dillo's
+environment, not the user's shell. The bundle lives under
+`~/.local/share/httpx-dpi/` rather than next to the launcher: dpid scans a
+plugin's directory and complains about every file that is not a `.dpi`.
+The smoke script installs from the tarball, as a user would, and asserts
+the launcher carries no path into the checkout. CI builds the package on
+every push.
+
+## Not done here
 - A settings page. Dillo plugins can serve pages of their own
   (`dpi:/httpx/`); an account form there, writing `httpx.json`, would spare
   the text editor. Small, and not needed to prove the scheme works.

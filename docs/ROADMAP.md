@@ -356,8 +356,11 @@ mobile) is researched and written down.
   `npm run smoke:dillo` runs a real dpid and real Dillo under Xvfb against
   the demo gateway and keeps the screenshot. `dpi:/httpx/` (2026-09-15) is
   the plugin's own status page with a settings form that writes
-  `httpx.json`. Limits are Dillo's: no POST (plugins receive only the URL),
-  no revalidation. Reasoning in [dillo-plugin.md](dillo-plugin.md).
+  `httpx.json`. Packaged (2026-09-15): `npm run package` builds a tarball
+  with the esbuild bundle, a node-finding launcher, an installer and the
+  bundled dependencies' licenses; the smoke test installs from it. Limits are
+  Dillo's: no POST (plugins receive only the URL), no revalidation.
+  Reasoning in [dillo-plugin.md](dillo-plugin.md).
 
 ## Cross-cutting quick wins (any time)
 
