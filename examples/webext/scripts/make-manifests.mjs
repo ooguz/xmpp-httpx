@@ -19,7 +19,8 @@ const targets = {
     background: { scripts: ["background.js"] },
     browser_specific_settings: {
       gecko: {
-        id: "httpx-browser@xmpp-httpx.example",
+        // Permanent once signed: AMO keys the add-on on this ID forever.
+        id: "httpx-browser@ooguz.dev",
         // 142, not 128: the data-consent key below landed in Firefox 140
         // (142 on Android), and AMO now requires it for new submissions. The
         // extension's own floor is lower — FormData's submitter argument

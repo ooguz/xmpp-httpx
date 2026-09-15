@@ -220,8 +220,11 @@ Goal: from demo to daily-drivable.
   ["none"]}`), which raised `strict_min_version` to 142 because that is where
   the key landed (Firefox 140/142-Android); the extension itself needs nothing
   that new. `web-ext lint` is down to a single acknowledged warning (the
-  sanitized `srcdoc` assignment). Owner-blocked: AMO signing and Web Store
-  upload need publisher credentials, see [RELEASING.md](../RELEASING.md).
+  sanitized `srcdoc` assignment). The add-on ID is final
+  (`httpx-browser@ooguz.dev`, 2026-09-15), `npm run sign:firefox` wraps the
+  signing call (credentials from the environment), and `npm run package`
+  also writes the AMO source archive with rebuild steps. Owner-blocked: the
+  AMO and Web Store accounts themselves, see [RELEASING.md](../RELEASING.md).
 - [x] **`web+httpx` site handler research** (S):
   [web-httpx-handler.md](web-httpx-handler.md). Conclusion: `httpx:` itself can
   never be registered (the `registerProtocolHandler` safelist is fixed by

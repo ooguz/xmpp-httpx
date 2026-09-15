@@ -79,6 +79,19 @@ npm run build        # builds ../.. → vite build → dist/chromium + dist/fire
    JID `alice@localhost`, password `e2e-alice`.
 4. Navigate to `httpx://web@httpx.localhost/`.
 
+## Signing and the stores
+
+`npm run package` writes three files into `dist/artifacts/`: the Firefox
+zip, the Chromium zip, and `httpx-browser-source-<version>.tar.gz`, the
+source archive AMO asks for when it cannot read bundled code (with a
+`BUILD.md` of exact rebuild steps). `npm run sign:firefox` hands the
+Firefox build to Mozilla's signing service; it reads `WEB_EXT_API_KEY` and
+`WEB_EXT_API_SECRET` from the environment and defaults to the unlisted
+channel (`WEB_EXT_CHANNEL=listed` for the store). The add-on ID,
+`httpx-browser@ooguz.dev`, is permanent once signed. Chrome signs on upload
+to the Web Store. The owner's steps are in
+[RELEASING.md](../../RELEASING.md).
+
 ## Caveats (demo-grade, on purpose)
 
 - Credentials are stored in extension storage in plaintext.

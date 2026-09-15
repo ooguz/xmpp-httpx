@@ -2,7 +2,7 @@
   "name": "httpx-browser-webext",
   "private": true,
   "version": "0.1.0",
-  "description": "WebExtension browser for httpx:// URLs (XEP-0332) — Firefox + Chromium",
+  "description": "WebExtension browser for httpx:// URLs (XEP-0332) \u2014 Firefox + Chromium",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -10,9 +10,11 @@
     "build": "npm run build:lib && vite build && node scripts/make-manifests.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "web-ext lint --source-dir dist/firefox",
-    "package": "npm run build && web-ext build --source-dir dist/firefox --artifacts-dir dist/artifacts --filename httpx-browser-firefox-{version}.zip --overwrite-dest && web-ext build --source-dir dist/chromium --artifacts-dir dist/artifacts --filename httpx-browser-chromium-{version}.zip --overwrite-dest",
+    "package": "npm run build && web-ext build --source-dir dist/firefox --artifacts-dir dist/artifacts --filename httpx-browser-firefox-{version}.zip --overwrite-dest && web-ext build --source-dir dist/chromium --artifacts-dir dist/artifacts --filename httpx-browser-chromium-{version}.zip --overwrite-dest && node scripts/make-source-archive.mjs",
     "dev:firefox": "web-ext run --source-dir dist/firefox",
-    "dev:chromium": "echo 'Load dist/chromium via chrome://extensions → Load unpacked'"
+    "dev:chromium": "echo 'Load dist/chromium via chrome://extensions \u2192 Load unpacked'",
+    "source-archive": "node scripts/make-source-archive.mjs",
+    "sign:firefox": "web-ext sign --source-dir dist/firefox --artifacts-dir dist/artifacts --channel \"${WEB_EXT_CHANNEL:-unlisted}\""
   },
   "dependencies": {
     "@xmpp/client": "^0.14.0",

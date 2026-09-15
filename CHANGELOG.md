@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **WebExtension: ready to sign.** The Firefox add-on ID is now the permanent
+  `httpx-browser@ooguz.dev`. `npm run sign:firefox` wraps `web-ext sign`
+  (credentials from `WEB_EXT_API_KEY`/`WEB_EXT_API_SECRET`, unlisted channel
+  by default, `WEB_EXT_CHANNEL=listed` for the store), and `npm run package`
+  also writes the source archive AMO asks for when code is bundled: library
+  and extension sources plus a `BUILD.md` with the exact rebuild steps.
+  RELEASING.md gained the AMO and Chrome Web Store walkthrough.
 - **Dillo plugin packaged.** `npm run package` in `examples/dillo/` builds
   `httpx-dillo-dpi-<version>.tar.gz`: the plugin bundled into one file by
   esbuild, a launcher that finds Node 20+ at run time (PATH, `~/.nvm`, system
