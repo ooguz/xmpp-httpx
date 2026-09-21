@@ -416,6 +416,12 @@ on the other end.
 
 ## Cross-cutting quick wins (any time)
 
+- [ ] **CI action versions** (S): every job in `.github/workflows/ci.yml` pins
+  `actions/checkout@v4` and `actions/setup-node@v4`, which target Node 20;
+  GitHub already forces them onto Node 24 and warns on every run. Bump both to
+  `@v5` (and `upload-pages-artifact`/`deploy-pages` while there). Separately,
+  `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19 — worth one run on
+  `ubuntu-26.04` before the label moves, since the e2e job brings up Docker.
 - [x] `HttpxResponse.formData()`, which delegates to the platform's parser, so
   multipart works without a multipart parser living here, plus
   `parseAccept`/`negotiateContentType` for content negotiation that gets
