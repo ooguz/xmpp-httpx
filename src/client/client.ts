@@ -59,6 +59,22 @@ export interface HttpxClientOptions {
   /** Idle timeout for streamed response bodies. */
   idleTimeoutMs?: number;
   /**
+   * IBB blocks kept in flight when streaming a request body, and the number
+   * an inbound response body may run ahead before acks are withheld. Default
+   * 8. One block costs a round trip, so this is the multiplier on a
+   * high-latency path; 1 restores the block-at-a-time sender.
+   */
+  ibbWindow?: number;
+  /**
+   * Decoded bytes per IBB block for *request* bodies. XEP-0332 gives the
+   * responder no way to advertise a limit for those, so unlike the response
+   * direction — where `maxChunkSize` above tells the server what this client
+   * can receive — there is nothing to negotiate with and this is simply the
+   * size used. Default 4096. Derive it with `stanzaBudgets(maxStanzaBytes)`,
+   * against the *responder's* limit.
+   */
+  ibbBlockSize?: number;
+  /**
    * Advertise Accept-Encoding: gzip, deflate (responses are transparently
    * decompressed either way). Default true.
    */
@@ -152,6 +168,11 @@ export class HttpxClient {
     this.#options = options;
     this.#router = ChunkRouter.acquire(session);
     this.#ibb = IbbManager.acquire(session);
+    if (options.ibbWindow !== undefined) {
+      // Per session, not per stream: an <open> arrives before any per-stream
+      // setup exists. Shared with anything else using IBB on this session.
+      this.#ibb.receiveWindowBlocks = options.ibbWindow;
+    }
     this.#registry = createDefaultRegistry(
       session,
       options.socks5 !== undefined ? { socks5: options.socks5 } : undefined,
@@ -194,8 +215,17 @@ export class HttpxClient {
       body: source,
       ...(contentType !== null ? { contentType } : {}),
       // The XEP offers no way to learn what the responder accepts for
-      // *request* bodies; assume the mechanisms we ourselves implement.
-      accept: { ibb: acceptIbb, chunked: true, sipub: true, jingle: true },
+      // *request* bodies; assume the mechanisms we ourselves implement, and
+      // let ibbBlockSize stand in for the maxChunkSize the peer cannot send.
+      accept: {
+        ibb: acceptIbb,
+        chunked: true,
+        sipub: true,
+        jingle: true,
+        ...(this.#options.ibbBlockSize !== undefined
+          ? { maxChunkSize: this.#options.ibbBlockSize }
+          : {}),
+      },
       inlineBudgetBytes: this.#options.inlineBudgetBytes ?? DEFAULT_INLINE_BUDGET,
       preferredStreams: this.#options.preferredStreams ?? ["ibb", "chunkedBase64"],
     });
@@ -347,6 +377,9 @@ export class HttpxClient {
     const out = await this.#ibb.openOutgoing(to, {
       sid: streamBody.id,
       blockSize: streamBody.blockSize,
+      ...(this.#options.ibbWindow !== undefined
+        ? { window: this.#options.ibbWindow }
+        : {}),
       ...(from !== undefined ? { from } : {}),
     });
     try {

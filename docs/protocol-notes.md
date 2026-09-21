@@ -20,11 +20,60 @@ rather than an accident.
   chunks at 8192 decoded bytes so each stanza stays well under the 10 KiB
   stanza-size floor of RFC 6120 after base64 expansion (~1.37×).
 
+## Methods and request targets
+
+- **`CONNECT` is added to the method list**, which XEP-0332 v0.5.1 does not
+  have: its `method` enumeration stops at `PATCH`, mirroring RFC 2616 minus
+  `CONNECT`. A tunnel cannot be asked for without it, and a private method
+  name would be a larger deviation than the name HTTP already uses. A peer
+  that does not implement it answers `501`, which is the behaviour the XEP
+  prescribes for a method it does not support — so the deviation costs
+  nothing on the wire against an implementation that has never heard of it.
+- `resource` accepts all four RFC 9112 §3.2 request-target forms, not only
+  the origin-form (`/index.html?x=1`) the XEP shows: `*` as before,
+  authority-form (`example.org:443`) and absolute-form
+  (`https://example.org/x`). Origin-form decoding is unchanged — anything
+  starting with `/` is accepted exactly as it was.
+- Authority-form is refused for every method except `CONNECT`, per RFC 9112
+  §3.2.3. The XEP is silent, but a `GET` whose resource is `example.org:443`
+  hands a handler something that reads like a path and names a host, which is
+  the one confusion a proxy cannot afford.
+- Authority-form is deliberately stricter than a URL parser: no userinfo, no
+  path, no query, and a port in 1–65535 is required. `evil.org:80/../admin`
+  and `user@evil.org:80` are rejected rather than reinterpreted.
+- `HttpxServerRequest.url` is the reconstructed `httpx://` URL for
+  origin-form and `*`. For absolute-form and authority-form — which already
+  name their own target — it is the `resource` verbatim.
+
 ## IBB (XEP-0047)
 
 - We send data exclusively as IQ stanzas: the per-block IQ ack gives flow
   control (the receiver withholds acks while its consumer lags) and error
   propagation. We accept message-carried data for interop leniency.
+- **Several blocks are in flight at once** (default 8): the IQ result of block
+  k releases block k+window. XEP-0047 neither requires nor forbids this — it
+  says the sender "SHOULD" wait for the ack before sending the next block
+  under §2.2's error handling, but the sequencing rule it actually imposes is
+  on `seq`, which we still assign and send in strict order. One block per
+  round trip is a protocol-level bandwidth-delay cap (4 KiB / 100 ms ≈
+  40 KB/s) with nothing to show for it: the acks remain exactly as
+  meaningful, there are simply several outstanding. `window: 1` restores the
+  old behaviour.
+- The receiver's buffer is the other half of the window. It holds
+  `(receiveWindowBlocks + 1) × block-size` (at least 64 KiB, at most 1 MiB)
+  before it starts withholding acks, so the effective number of blocks in
+  flight is the smaller of the two sides' windows — with nothing negotiated,
+  because a full receiver simply stops acking.
+- Both idle deadlines scale with the window. A block's IQ deadline is
+  `idleTimeoutMs × window`, because it starts at dispatch and the last block of
+  a window waits for the whole window to drain. A receiver withholding acks
+  measures `idleTimeoutMs × (receiveWindowBlocks + 1)` instead of the plain
+  one, because it is itself the reason nothing is arriving — stretched rather
+  than stopped, so a consumer that walks away without cancelling is still
+  reaped instead of holding the stream for the session.
+- A block whose IQ fails closes the stream with that block's error, latched to
+  the earliest block in send order — a dead receiver rejects every
+  outstanding block at once and rejection order is not send order.
 - Unsolicited `<open>`s are refused with `<not-acceptable/>`, but an
   unclaimed open is parked ~5 s first (the IQ reply is withheld), because the
   announcing `<resp>`/`<req>` and the `<open>` can be dispatched in the same

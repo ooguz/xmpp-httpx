@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+- **Windowed IBB sending.** Up to `ibbWindow` blocks (default 8) are in flight
+  at once: the IQ result of block k releases block k+window, instead of every
+  block waiting for its own round trip. That cap was the real limit on IBB —
+  4 KiB per RTT measured 40.2 KB/s on a simulated 100 ms path, and the same
+  1 MiB body now moves at 2.41 MB/s with 64 KiB blocks and a window of 8. Over
+  a real Prosody, 8 MiB of IBB goes at 9.17 MB/s, which is past
+  `chunkedBase64` for the first time. The acks it was paying for are all still
+  there. `ibbWindow: 1` is the old sender. `ibbBlockSize` caps what a server
+  sends and sets what a client sends for request bodies, where XEP-0332 gives
+  the responder no way to advertise a limit; response-body block size still
+  comes from the requester's `maxChunkSize`, i.e. from
+  `stanzaBudgets(maxStanzaBytes)`.
+  Ordering, backpressure and error reporting all had to be re-earned: taking,
+  encoding and sending a block is one synchronous step (the receiver tolerates
+  no `seq` gaps); `write()` still blocks once the window is full, so a
+  receiver that stops reading still stops the sender; a failed block closes
+  the stream with the *earliest* failure in send order, since a dead receiver
+  rejects everything outstanding at once and rejection order is not send
+  order; and `close()` waits for every outstanding ack before `<close/>`.
+  The receiving side grew the other half of the window — its queue holds
+  `(window + 1) x block-size` rather than a flat 64 KiB, without which the
+  first 64 KiB block alone drives `desiredSize` to 0 and the window collapses
+  back to one block per round trip — and a receiver that is deliberately
+  withholding acks now suspends its own idle timer instead of timing out a
+  stream that is silent on its own instructions.
+- **`CONNECT`, and the other request-target forms.** `CONNECT` joins
+  `HTTP_METHODS` (a deliberate departure from XEP-0332 v0.5.1, whose method
+  list stops at `PATCH` — recorded in `docs/protocol-notes.md`), and `<req
+  resource=…>` now accepts authority-form (`example.org:443`, `CONNECT` only
+  per RFC 9112 §3.2.3) and absolute-form (`https://example.org/x`) alongside
+  the origin-form and `*` it already took. Origin-form decodes exactly as
+  before. Authority-form is checked strictly — no userinfo, no path, no
+  query, a port in 1–65535 — so `evil.org:80/../admin` is rejected rather
+  than reinterpreted.
+- **The origin proxy refuses a target naming another origin.**
+  `createOriginProxyHandler` resolved the requester's `resource` against the
+  configured origin with `new URL(ref, base)`, which drops the base entirely
+  for anything carrying its own authority. Absolute-form makes that spellable
+  as `https://…`, but it was already reachable before this release with a
+  protocol-relative `//169.254.169.254/…`, which starts with `/` and so passed
+  the old origin-form check: an authorized requester could make the gateway
+  fetch any host reachable from it, with `x-httpx-from` naming their
+  authenticated JID to whoever answered. The handler now compares the resolved
+  origin against the configured one and answers 400 on a mismatch, which
+  closes both spellings. A forward proxy wanting absolute-form is a different
+  handler with its own destination policy.
+
 - **WebExtension: ready to sign.** The Firefox add-on ID is now the permanent
   `httpx-browser@ooguz.dev`. `npm run sign:firefox` wraps `web-ext sign`
   (credentials from `WEB_EXT_API_KEY`/`WEB_EXT_API_SECRET`, unlisted channel

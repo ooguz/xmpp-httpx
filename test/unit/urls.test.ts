@@ -3,6 +3,7 @@ import {
   formatHttpxUrl,
   parseHttpxUrl,
   resolveHttpxUrl,
+  resourceForm,
 } from "../../src/urls.js";
 
 describe("httpx URLs", () => {
@@ -66,5 +67,50 @@ describe("httpx URLs", () => {
     expect(resolveHttpxUrl(base, "other.html#sec")).toBe(
       "httpx://web@example.org/docs/other.html",
     );
+  });
+});
+
+describe("request-target forms", () => {
+  it("classifies the four RFC 9112 forms", () => {
+    expect(resourceForm("/index.html?x=1")).toBe("origin");
+    expect(resourceForm("/")).toBe("origin");
+    expect(resourceForm("*")).toBe("asterisk");
+    expect(resourceForm("example.org:443")).toBe("authority");
+    expect(resourceForm("[2001:db8::1]:8443")).toBe("authority");
+    expect(resourceForm("https://example.org/a/b?c=1")).toBe("absolute");
+    expect(resourceForm("http://example.org")).toBe("absolute");
+  });
+
+  it("rejects targets that only look like an authority", () => {
+    // A bare host is not authority-form: without a port there is nothing to
+    // connect to, and it would shadow a relative path.
+    expect(resourceForm("example.org")).toBeUndefined();
+    expect(resourceForm("example.org:")).toBeUndefined();
+    expect(resourceForm("example.org:0")).toBeUndefined();
+    expect(resourceForm("example.org:99999")).toBeUndefined();
+    expect(resourceForm("example.org:443x")).toBeUndefined();
+    // Userinfo, a path or a query would smuggle a second target past a
+    // proxy that only looked at the host part.
+    expect(resourceForm("user@example.org:443")).toBeUndefined();
+    expect(resourceForm("example.org:443/admin")).toBeUndefined();
+    expect(resourceForm("example.org:443?x=1")).toBeUndefined();
+    expect(resourceForm("[2001:db8::1")).toBeUndefined();
+    expect(resourceForm("")).toBeUndefined();
+    expect(resourceForm("no-slash")).toBeUndefined();
+  });
+
+  it("rejects absolute targets with no host or a fragment", () => {
+    // A non-special scheme really can have an empty authority.
+    expect(resourceForm("foo://")).toBeUndefined();
+    expect(resourceForm("https://example.org/a#frag")).toBeUndefined();
+  });
+
+  it("agrees with WHATWG on an authority a URL parser would normalize", () => {
+    // WHATWG's "special authority ignore slashes" state eats the extra slash,
+    // so this names the host `a`, not an empty one. We classify it the way a
+    // downstream `new URL(resource)` would resolve it — the two must not
+    // disagree about what the target is.
+    expect(resourceForm("https:///a")).toBe("absolute");
+    expect(new URL("https:///a").hostname).toBe("a");
   });
 });

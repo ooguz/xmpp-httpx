@@ -1,5 +1,11 @@
 import type { Element } from "@xmpp/xml";
 
+/**
+ * CONNECT is a deliberate departure from XEP-0332 v0.5.1, whose method list
+ * stops at PATCH — see docs/protocol-notes.md. Without it a tunnel cannot be
+ * requested at all, and the alternative (a private method name) would be a
+ * larger deviation than reusing the one HTTP already has.
+ */
 export const HTTP_METHODS = [
   "OPTIONS",
   "GET",
@@ -9,6 +15,7 @@ export const HTTP_METHODS = [
   "DELETE",
   "TRACE",
   "PATCH",
+  "CONNECT",
 ] as const;
 
 export type HttpMethod = (typeof HTTP_METHODS)[number];

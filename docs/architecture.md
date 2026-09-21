@@ -167,6 +167,119 @@ are refused, but an unclaimed open is parked ~5 s first because the
 announcing stanza and the `<open>` can race the local registration.
 Consumer-side cancel sends `<close/>` to the peer.
 
+#### The send window
+
+`window` blocks (default `DEFAULT_IBB_WINDOW` = 8) are in flight at once: the
+IQ result of block k is what releases block k+window. Without it the ack is
+not just flow control, it is a bandwidth-delay cap — one block per round trip,
+4 KiB / 100 ms ≈ 40 KB/s, no matter how fat the pipe.
+
+Four things hold it together, and each has a test that fails without it
+(`test/integration/ibb-window.test.ts`):
+
+- **Ordering by construction.** Taking a block from the buffer, base64-ing it,
+  assigning its `seq` and handing it to `iqCaller` is one synchronous step.
+  Both `@xmpp/connection` and `MockSession` reach their socket write
+  synchronously from `request()`, so call order is wire order. The receiver
+  tolerates no gaps — a `seq` jump kills the stream — so an `await` inserted
+  anywhere in that step would corrupt the body, not merely slow it.
+- **Backpressure survives.** `write()` still blocks; it just yields after
+  `window` blocks instead of one. A receiver that stops reading stops acking,
+  and the sender stops for good rather than after a timeout.
+- **Failure is deterministic.** Every in-flight block gets its rejection
+  handler at dispatch (nothing is awaiting the other `window-1` promises, and
+  an unhandled rejection is fatal on Node ≥ 20), and the failure is latched to
+  the *earliest* block in send order: a dead receiver rejects every
+  outstanding block at once and each carries its own timeout, so rejection
+  order is not send order. `close()` waits for every outstanding ack before it
+  sends `<close/>`, so awaiting it still means "delivered".
+- **The receiver has the other half of the window.** Its queue holds
+  `(receiveWindowBlocks + 1) × block-size`, floored at 64 KiB and capped at
+  `DEFAULT_MAX_BUFFERED_BYTES`. One block short of that and the first 64 KiB
+  block alone drives `desiredSize` to 0, every ack waits for a consumer read,
+  and the sender's window collapses back to one block per round trip. The
+  effective in-flight count is the smaller of the two sides' windows, with
+  nothing negotiated.
+
+Both idle deadlines had to learn about the window, in opposite directions. A
+block's IQ deadline starts when it is *dispatched*, so the last block of a
+window has already waited for the whole window to drain before its own ack is
+due — it gets `idleTimeoutMs × window`, which is the patience the old sender
+gave each block in turn. On the receiving side, a stream withholding acks is
+silent on its own instructions, so the ordinary deadline would be measuring
+its own decision; but switching the clock off entirely means a consumer that
+walks away without cancelling keeps its buffered bytes and every parked
+handler for the life of the session. The clock is stretched instead:
+`idleTimeoutMs × (receiveWindowBlocks + 1)` while an ack is withheld.
+
+Block size is the requester's call, since it is the requester's stanza limit
+that has to carry the base64: it comes from `<req maxChunkSize=…>`, which
+`stanzaBudgets(maxStanzaBytes)` derives from a known server limit. 64 KiB
+blocks need `maxStanzaBytes ≈ 88 KiB` (base64 is 4/3, plus envelope), which
+the Prosody used in the e2e suite allows at 256 KiB per c2s stanza.
+`ibbBlockSize` on the server only ever lowers what was asked for; on the
+client it is the size used for *request* bodies, where XEP-0332 gives the
+responder no way to advertise a limit at all.
+
+#### Throughput
+
+`test/bench/ibb-window.bench.ts` (mock pair, `deliverHook` holding each
+stanza for RTT/2) and `npm run bench:prosody` (real server, loopback).
+
+First the latency question, since that is what the window is for. A 1 MiB
+body throughout, so every row is the same work (mean of the bench's samples;
+`window 1` is the pre-window sender, measured on the commit before this one):
+
+| Path | Block | Window | Time | Throughput | vs. baseline |
+|---|---|---|---|---|---|
+| 100 ms RTT | 4 KiB | 1 | 26 060 ms | **40.2 KB/s** | 1× (the baseline) |
+| 100 ms RTT | 64 KiB | 1 | 1 887 ms | 555 KB/s | 13.8× |
+| 100 ms RTT | 64 KiB | 8 | 435 ms | **2.41 MB/s** | **59.9×** |
+| 100 ms RTT | 64 KiB | 16 | 334 ms | 3.14 MB/s | 78.1× |
+| loopback | 4 KiB | 1 | 24.3 ms | 43.1 MB/s | — |
+| loopback | 4 KiB | 8 | 23.9 ms | 43.9 MB/s | — |
+| loopback | 64 KiB | 1 | 25.5 ms | 41.1 MB/s | — |
+| loopback | 64 KiB | 8 | 22.3 ms | 47.0 MB/s | — |
+
+At 8 MiB, where the three fixed round trips (request, `<open>`, `<close>`) no
+longer dominate, the 100 ms path reaches 4.40 MB/s at window 8 and 7.75 MB/s at
+window 16. There is no window-1 row for that size: it would need ~3.5 minutes
+for a single sample.
+
+The 40.2 KB/s baseline is not a coincidence — it is 4096 bytes per 100 ms round
+trip, which is what "one block, one RTT" means arithmetically.
+
+The shape to read off it: at loopback latency neither knob matters much —
+everything is within noise of ~45 MB/s, because base64 and framing are the
+cost and there are no round trips to save. At 100 ms the window is nearly
+everything, because round trips, not bytes, are the budget. Which is the
+point: the old sender's ceiling had nothing to do with the link.
+
+Over a real Prosody (`npm run bench:prosody`, everything crossing the server,
+both endpoints on loopback so latency is sub-millisecond), with the defaults —
+window 8, and the block size the requester's `maxChunkSize` allows:
+
+| Body | `ibb` via server | `chunkedBase64` via server | sipub + SOCKS5 (direct TCP) |
+|---|---|---|---|
+| 64 KiB | 0.50 MB/s | 1.45 MB/s | 0.76 MB/s |
+| 1 MiB | 4.36 MB/s | 11.7 MB/s | 12.2 MB/s |
+| 8 MiB | **9.17 MB/s** | 7.65 MB/s | 92.4 MB/s |
+
+IBB now overtakes `chunkedBase64` at 8 MiB, which it never did before: the
+acks used to cost a round trip each, and at loopback latency that was still
+enough to lose to a mechanism with no acks at all. It stays behind on small
+bodies, where the `<open>`/`<close>` handshake is most of the transfer, and far
+behind the SOCKS5 paths, which is the whole point of XEP-0065 — those bytes
+never touch the server.
+
+One interaction worth knowing about on a real connection: `@xmpp/client`
+enables XEP-0198 stream management, which retains every outbound stanza until
+the server acks it and resets its 250 ms ack-request debounce on each new
+stanza. A saturated sender therefore never pauses long enough to ask for an
+ack, and the retained queue grows with the transfer rather than with the
+window. That is not new — an unwindowed sender at loopback latency sends far
+more often than every 250 ms — but a large window makes it easier to reach.
+
 ### sipub, XEP-0137 over XEP-0095 SI (`src/sipub/sipub.ts`)
 
 Control plane only; the sid chain `starting sid = SI id = IBB sid` hands the
@@ -383,16 +496,18 @@ All defaults live in `src/constants.ts`:
 | `DEFAULT_MAX_BUFFERED_BYTES` | 1 MiB | out-of-order chunk buffer |
 | `DEFAULT_MAX_REQUEST_BODY_BYTES` | 8 MiB | server-side body cap |
 | `DEFAULT_IBB_BLOCK_SIZE` | 4096 | IBB block size |
+| `DEFAULT_IBB_WINDOW` / `MAX_IBB_WINDOW` | 8 / 256 | IBB blocks in flight, each way |
 | `DEFAULT_IBB_ACCEPT_TIMEOUT_MS` | 5 000 | parked-open/parked-offer window |
 | `DEFAULT_OFFER_TTL_MS` | 60 000 | unclaimed sipub/jingle offer expiry |
 | `DEFAULT_SOCKS5_CONNECT_TIMEOUT_MS` | 10 000 | SOCKS5 candidate connect attempt |
 
 `HttpxClientOptions`: `defaultTimeoutMs`, `maxChunkSize`, `accept: { ibb?,
 sipub?, jingle? }` (all default true), `discover` (true), `inlineBudgetBytes`,
-`preferredStreams`, `maxBufferedBytes`, `idleTimeoutMs`, `from` (required for
-components), `socks5` (Node-only, see `createSocks5Adapter` in
-`xmpp-httpx/node`).
+`preferredStreams`, `maxBufferedBytes`, `idleTimeoutMs`, `ibbWindow` (8),
+`ibbBlockSize` (request bodies only), `from` (required for components),
+`socks5` (Node-only, see `createSocks5Adapter` in `xmpp-httpx/node`).
 
 `HttpxServerOptions`: `authorize`, `inlineBudgetBytes`, `preferredStreams`,
-`maxRequestBodyBytes`, `idleTimeoutMs`, `advertise` (true), `onError`,
-`socks5` (same as above).
+`maxRequestBodyBytes`, `idleTimeoutMs`, `ibbWindow` (8), `ibbBlockSize` (a cap
+on what the requester asked for), `advertise` (true), `onError`, `socks5`
+(same as above).

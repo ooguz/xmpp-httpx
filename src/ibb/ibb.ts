@@ -2,9 +2,11 @@ import xml, { Element } from "@xmpp/xml";
 import {
   DEFAULT_IBB_ACCEPT_TIMEOUT_MS,
   DEFAULT_IBB_BLOCK_SIZE,
+  DEFAULT_IBB_WINDOW,
   DEFAULT_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_BUFFERED_BYTES,
   MAX_CHUNK_SIZE,
+  MAX_IBB_WINDOW,
   NS_IBB,
   NS_STANZAS,
 } from "../constants.js";
@@ -23,7 +25,17 @@ import { BlockBuffer } from "../util/bytes.js";
  *
  * Sending uses IQ-carried <data> exclusively: each block is acknowledged by
  * an IQ result, which provides flow control and error propagation for free.
- * Receiving additionally tolerates message-carried <data> for interop.
+ * Up to `window` blocks are in flight at once — the result of block k is what
+ * releases block k+window — so throughput stops being one block per round
+ * trip without giving up the acks. Receiving additionally tolerates
+ * message-carried <data> for interop.
+ *
+ * Ordering is preserved by construction and nowhere else: a block is taken
+ * from the buffer, base64-encoded, given its seq and handed to iqCaller in
+ * one synchronous step, and both @xmpp/connection and the mock session reach
+ * their socket write synchronously from request(). The receiver accepts no
+ * gaps (a seq jump kills the stream), so an await anywhere between taking a
+ * block and sending it would corrupt the stream rather than merely slow it.
  *
  * Unsolicited incoming <open>s are not accepted: only sids pre-announced via
  * expectIncoming() are. Because the announcing stanza and the <open> can race
@@ -38,9 +50,21 @@ export interface IbbOutStream {
    * until a later write or close() sends it, so the caller must not mutate
    * the array after this resolves (the same contract as a WHATWG or Node
    * stream sink — reusing a scratch buffer between writes corrupts the tail).
+   *
+   * Resolves once every full block it produced has been *sent*, not acked:
+   * with a window > 1 those blocks are still outstanding. It still blocks
+   * while the window is full, so it remains the backpressure the callers'
+   * pump loops rely on — it just yields after `window` blocks instead of
+   * one. A block that fails later is reported by a subsequent write() or by
+   * close(), which waits for every outstanding ack.
    */
   write(bytes: Uint8Array): Promise<void>;
-  /** Flushes any buffered partial block and sends <close/>. */
+  /**
+   * Flushes any buffered partial block, waits for every outstanding block to
+   * be acknowledged, and sends <close/>. Rejects with the stream's failure if
+   * any block failed — so a caller that awaits close() has the same
+   * end-to-end guarantee it had when every write awaited its own ack.
+   */
   close(): Promise<void>;
   /** Best-effort <close/> without flushing; the local error is remembered. */
   abort(reason: Error): Promise<void>;
@@ -83,6 +107,18 @@ function iqError(
   return xml("error", { type }, xml(condition, { xmlns: NS_STANZAS }));
 }
 
+/**
+ * A window of blocks, from whatever the caller supplied. The finite check is
+ * load-bearing, not defensive: `inFlight >= NaN` is false, so a NaN window
+ * would silently admit every block at once and remove backpressure entirely —
+ * the one property this whole mechanism exists to keep.
+ */
+function clampWindow(value: number | undefined): number {
+  const wanted = value ?? DEFAULT_IBB_WINDOW;
+  if (!Number.isFinite(wanted)) return DEFAULT_IBB_WINDOW;
+  return Math.max(1, Math.min(MAX_IBB_WINDOW, Math.floor(wanted)));
+}
+
 export class IbbManager {
   static #instances = new WeakMap<object, IbbManager>();
 
@@ -111,6 +147,14 @@ export class IbbManager {
 
   acceptTimeoutMs = DEFAULT_IBB_ACCEPT_TIMEOUT_MS;
   idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+  /**
+   * Blocks an incoming stream will hold unread before it starts withholding
+   * acks. This is the receiver's half of the window: whatever the sender
+   * keeps in flight, the effective count is the smaller of the two, with no
+   * negotiation needed — the receiver simply stops acking. Per manager (so
+   * per session) because an <open> arrives before any per-stream setup.
+   */
+  receiveWindowBlocks = DEFAULT_IBB_WINDOW;
 
   private constructor(session: XmppSession) {
     this.#session = session;
@@ -141,11 +185,33 @@ export class IbbManager {
 
   async openOutgoing(
     to: string,
-    options?: { blockSize?: number; from?: string; sid?: string },
+    options?: {
+      blockSize?: number;
+      /**
+       * Blocks allowed in flight at once; the ack of block k releases block
+       * k+window. Default DEFAULT_IBB_WINDOW, clamped to [1, MAX_IBB_WINDOW];
+       * a window of 1 is exactly the old block-at-a-time sender.
+       *
+       * Per stream, never a manager field: one IbbManager is shared by the
+       * client, the server, sipub and jingle on a session, and a download's
+       * window is not an upload's.
+       */
+      window?: number;
+      from?: string;
+      sid?: string;
+    },
   ): Promise<IbbOutStream> {
     const sid = options?.sid ?? generateId("ibb");
     const blockSize = options?.blockSize ?? DEFAULT_IBB_BLOCK_SIZE;
+    const window = clampWindow(options?.window);
     const from = options?.from;
+    // Each block carries its own deadline, started when it was *dispatched* —
+    // so the last block of a window has been waiting for the whole window to
+    // drain by the time its own ack is due. Scaling the deadline by the window
+    // restores what the old sender gave every block: idleTimeoutMs of patience
+    // measured from its predecessor's ack. Without it, windowing would kill
+    // exactly the slow consumers that backpressure exists to serve.
+    const blockTimeoutMs = this.idleTimeoutMs * window;
 
     const open = xml("open", {
       xmlns: NS_IBB,
@@ -156,23 +222,77 @@ export class IbbManager {
     await this.#request(to, from, open);
 
     let seq = 0;
+    /** Blocks dispatched so far. Unwrapped, unlike seq, so it orders failures. */
+    let dispatched = 0;
     const buffered = new BlockBuffer();
     let closed = false;
-    let failed: Error | undefined;
+    /**
+     * The failure that closed the stream, latched to the *earliest* block
+     * that failed. A dead receiver rejects every outstanding block and each
+     * block carries its own timeout, so rejection order is not send order:
+     * without the ordinal the reported error would vary run to run.
+     */
+    let failed: { ordinal: number; error: Error } | undefined;
+    let inFlight = 0;
+    /** Woken when a slot frees, when the stream fails, and on drain. */
+    const slotWaiters: Array<() => void> = [];
+    const drainWaiters: Array<() => void> = [];
 
-    const sendBlock = async (bytes: Uint8Array) => {
+    const wake = (waiters: Array<() => void>) => {
+      for (const waiter of waiters) waiter();
+    };
+
+    const settle = () => {
+      inFlight--;
+      wake(slotWaiters.splice(0));
+      if (inFlight === 0) wake(drainWaiters.splice(0));
+    };
+
+    /**
+     * Takes one block and puts it on the wire. Synchronous end to end on
+     * purpose: encoding, the seq assignment and the send must not be split
+     * by an await, or a concurrent writer interleaves and the receiver —
+     * which tolerates no gaps — kills the stream.
+     */
+    const dispatch = (bytes: Uint8Array) => {
       const data = xml(
         "data",
         { xmlns: NS_IBB, sid, seq: String(seq) },
         encodeBase64(bytes),
       );
       seq = (seq + 1) % 65536;
-      await this.#request(to, from, data);
+      const ordinal = dispatched++;
+      inFlight++;
+      // The rejection handler is attached here, at dispatch, not where the
+      // block is awaited: with a window the other in-flight blocks reject
+      // with nobody awaiting them, and an unhandled rejection is fatal.
+      this.#request(to, from, data, blockTimeoutMs).then(settle, (err: unknown) => {
+        if (!failed || ordinal < failed.ordinal) {
+          failed = { ordinal, error: fromXmppError(err) };
+        }
+        settle();
+      });
+    };
+
+    const throwIfFailed = () => {
+      if (failed) throw failed.error;
     };
 
     const ensureUsable = () => {
-      if (failed) throw failed;
+      throwIfFailed();
       if (closed) throw new HttpxError("stream-error", "IBB stream closed");
+    };
+
+    /** Admits blocks while the buffer holds them and the window has room. */
+    const pump = async (take: () => Uint8Array, hasBlock: () => boolean) => {
+      while (hasBlock()) {
+        throwIfFailed();
+        if (inFlight >= window) {
+          await new Promise<void>((resolve) => slotWaiters.push(resolve));
+          continue; // re-check: another writer may have taken the slot
+        }
+        dispatch(take());
+      }
     };
 
     const sendClose = async () => {
@@ -185,31 +305,43 @@ export class IbbManager {
       write: async (bytes: Uint8Array): Promise<void> => {
         ensureUsable();
         buffered.push(bytes);
-        try {
-          while (buffered.size >= blockSize) {
-            await sendBlock(buffered.take(blockSize));
-          }
-        } catch (err) {
-          failed = fromXmppError(err);
-          throw failed;
-        }
+        await pump(
+          () => buffered.take(blockSize),
+          () => buffered.size >= blockSize,
+        );
       },
       close: async (): Promise<void> => {
         ensureUsable();
         closed = true;
+        // Tested at take time, not latched on entry: an un-awaited write()
+        // racing this one can drain the buffer while close()'s pump is parked
+        // on a window slot, and a latched "there was a remainder" would then
+        // send a zero-length block, burning a seq and a round trip.
+        await pump(
+          () => buffered.drain(),
+          () => buffered.size > 0,
+        );
+        while (inFlight > 0) {
+          await new Promise<void>((resolve) => drainWaiters.push(resolve));
+        }
+        // Only now is every block accounted for: a caller awaiting close()
+        // gets the same delivery guarantee it had when write() awaited each
+        // block's own ack.
+        throwIfFailed();
         try {
-          if (buffered.size > 0) {
-            await sendBlock(buffered.drain());
-          }
           await sendClose();
         } catch (err) {
-          failed = fromXmppError(err);
-          throw failed;
+          failed ??= { ordinal: dispatched, error: fromXmppError(err) };
+          throw failed.error;
         }
       },
       abort: async (reason: Error): Promise<void> => {
         if (closed || failed) return;
-        failed = reason;
+        // Ordinal -1: no block has failed yet (or `failed` would be set), and
+        // the local reason is the true cause — a later rejection from a block
+        // already in flight must not overwrite it.
+        failed = { ordinal: -1, error: reason };
+        wake(slotWaiters.splice(0));
         try {
           await sendClose();
         } catch {
@@ -223,15 +355,17 @@ export class IbbManager {
     to: string,
     from: string | undefined,
     child: Element,
+    timeoutMs?: number,
   ): Promise<Element> {
     const attrs: Record<string, string> =
       from !== undefined ? { type: "set", to, from } : { type: "set", to };
     try {
       // Bound each block by the idle timeout — a peer that stops acking
-      // must not stall the sender for the session's full IQ timeout.
+      // must not stall the sender for the session's full IQ timeout. Data
+      // blocks pass a window-scaled deadline; <open>/<close> use the plain one.
       return await this.#session.iqCaller.request(
         xml("iq", attrs, child),
-        this.idleTimeoutMs,
+        timeoutMs ?? this.idleTimeoutMs,
       );
     } catch (err) {
       throw fromXmppError(err);
@@ -355,6 +489,11 @@ export class IbbManager {
           state.controller = controller;
         },
         pull: () => {
+          // Consumer progress is liveness. Without this a stream that is
+          // *correctly* backpressured — window full, sender deliberately
+          // silent, consumer reading slowly — would trip the idle timer,
+          // which only ever saw block arrivals.
+          this.#armIdleTimer(key, state);
           for (const waiter of state.pullWaiters.splice(0)) waiter();
         },
         cancel: () => {
@@ -368,7 +507,9 @@ export class IbbManager {
           });
         },
       },
-      new ByteLengthQueuingStrategy({ highWaterMark: 64 * 1024 }),
+      new ByteLengthQueuingStrategy({
+        highWaterMark: this.#receiveBufferBytes(source.blockSize),
+      }),
     );
 
     this.#armIdleTimer(key, state);
@@ -420,7 +561,25 @@ export class IbbManager {
       !state.finished &&
       (state.controller.desiredSize ?? 1) <= 0
     ) {
+      // While we are the reason nothing is arriving, "idle" is our own doing:
+      // a stream that is correctly backpressured must not time itself out on
+      // the ordinary deadline. pull() is not enough to keep it alive — it
+      // only fires once desiredSize goes positive again, which under deep
+      // backpressure is several consumer reads away. So the clock is
+      // stretched across the window rather than stopped: a consumer working
+      // through a full window still has room, and a stream whose consumer
+      // walked away is still reaped instead of living for the session.
+      this.#armIdleTimer(key, state, this.#stalledTimeoutMs());
       await new Promise<void>((resolve) => state.pullWaiters.push(resolve));
+    }
+    // Resume measuring only once nobody is parked any more.
+    if (state.pullWaiters.length === 0) this.#armIdleTimer(key, state);
+    // The stream may have died while this handler was parked. Acking then
+    // would tell the sender that bytes nobody will ever read arrived — and
+    // under a window that is up to `window` false acks before the next block
+    // hits the item-not-found above, so the failure stops being prompt.
+    if (state.finished && !state.cancelled) {
+      return iqError("cancel", "item-not-found");
     }
     return true;
   }
@@ -494,7 +653,42 @@ export class IbbManager {
     }
   }
 
-  #armIdleTimer(key: string, state: InStreamState): void {
+  /**
+   * How much an inbound stream buffers before it withholds acks. It has to
+   * exceed the window the peer may have in flight, or the very first block
+   * drives desiredSize to 0 and every ack waits for a consumer read — the
+   * sender's window collapses back to one block per round trip. The extra
+   * block is what keeps desiredSize positive *after* a full window lands.
+   *
+   * Capped at DEFAULT_MAX_BUFFERED_BYTES so a peer cannot turn a large
+   * block-size into per-stream memory: the block size is the *peer's* choice
+   * on the receive side, and streams are cheap to open.
+   */
+  #receiveBufferBytes(blockSize: number): number {
+    const window = clampWindow(this.receiveWindowBlocks);
+    return Math.min(
+      DEFAULT_MAX_BUFFERED_BYTES,
+      Math.max(64 * 1024, (window + 1) * blockSize),
+    );
+  }
+
+  /**
+   * The deadline that applies while this side is deliberately withholding an
+   * ack. The peer is silent on our instructions, so the ordinary idle timeout
+   * would be measuring our own decision; but leaving it off entirely means a
+   * consumer that walks away keeps the stream — and its buffered bytes, and
+   * every parked handler — alive for the rest of the session. One idle
+   * timeout per block of the window is the honest budget: it is how long a
+   * consumer working steadily through a full window is allowed to take.
+   */
+  #stalledTimeoutMs(): number {
+    return this.idleTimeoutMs * (clampWindow(this.receiveWindowBlocks) + 1);
+  }
+
+  #armIdleTimer(key: string, state: InStreamState, timeoutMs?: number): void {
+    // pull() can fire after the stream is done (a consumer draining what is
+    // already queued); re-arming then would resurrect a dead stream's timer.
+    if (state.finished) return;
     if (state.idleTimer !== undefined) clearTimeout(state.idleTimer);
     state.idleTimer = setTimeout(() => {
       this.#finishInStream(
@@ -502,7 +696,7 @@ export class IbbManager {
         state,
         new HttpxError("timeout", "IBB stream idle timeout"),
       );
-    }, this.idleTimeoutMs);
+    }, timeoutMs ?? this.idleTimeoutMs);
     (state.idleTimer as { unref?: () => void }).unref?.();
   }
 

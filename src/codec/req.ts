@@ -7,12 +7,18 @@ import {
 } from "../constants.js";
 import { CodecError } from "../errors.js";
 import { isHttpMethod, type HttpMethod, type StreamAccept } from "../types.js";
+import { resourceForm } from "../urls.js";
 import { decodeData, encodeData, type DataDescriptor } from "./data.js";
 import { decodeHeaders, encodeHeaders } from "./headers.js";
 
 export interface ReqStanza {
   method: HttpMethod;
-  /** Path + optional query, e.g. "/index.html?x=1" (or "*" for OPTIONS). */
+  /**
+   * The request target. Origin-form ("/index.html?x=1") is what XEP-0332
+   * shows and what everything but a proxy sends; "*" (OPTIONS),
+   * authority-form ("example.org:443", CONNECT only) and absolute-form
+   * ("https://example.org/x") are also accepted — see docs/protocol-notes.md.
+   */
   resource: string;
   version: string;
   /** Decoded-byte chunk size the requester accepts, clamped to [256, 65536]. */
@@ -72,8 +78,17 @@ export function decodeReq(el: Element): ReqStanza {
   }
 
   const resource = el.attrs["resource"];
-  if (!resource || (!resource.startsWith("/") && resource !== "*")) {
+  const form = resource ? resourceForm(resource) : undefined;
+  if (!resource || form === undefined) {
     throw new CodecError(`invalid or missing resource "${resource ?? ""}"`);
+  }
+  // RFC 9112 §3.2.3: authority-form is CONNECT's and nothing else's. Letting
+  // a GET carry "example.org:443" would hand a handler something that looks
+  // like a path but names a host — the confusion a proxy least needs.
+  if (form === "authority" && method !== "CONNECT") {
+    throw new CodecError(
+      `authority-form resource "${resource}" is only valid for CONNECT`,
+    );
   }
 
   const version = el.attrs["version"] ?? HTTP_VERSION;

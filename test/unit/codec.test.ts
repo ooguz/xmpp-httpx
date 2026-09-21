@@ -143,6 +143,44 @@ describe("codec error handling", () => {
     ).toThrow(CodecError);
   });
 
+  it("accepts CONNECT with an authority-form target, and no other method", () => {
+    const req = decodeReq(
+      xml("req", {
+        xmlns: NS_HTTPX,
+        method: "CONNECT",
+        resource: "example.org:443",
+        version: "1.1",
+      }),
+    );
+    expect(req.method).toBe("CONNECT");
+    expect(req.resource).toBe("example.org:443");
+
+    // RFC 9112 §3.2.3 — authority-form belongs to CONNECT alone. A GET
+    // carrying one would hand a handler a host that reads like a path.
+    expect(() =>
+      decodeReq(
+        xml("req", {
+          xmlns: NS_HTTPX,
+          method: "GET",
+          resource: "example.org:443",
+          version: "1.1",
+        }),
+      ),
+    ).toThrow(CodecError);
+  });
+
+  it("accepts an absolute-form target", () => {
+    const req = decodeReq(
+      xml("req", {
+        xmlns: NS_HTTPX,
+        method: "GET",
+        resource: "https://example.org/a?b=1",
+        version: "1.1",
+      }),
+    );
+    expect(req.resource).toBe("https://example.org/a?b=1");
+  });
+
   it("rejects the wrong element or namespace", () => {
     expect(() => decodeReq(xml("resp", { xmlns: NS_HTTPX }))).toThrow(CodecError);
     expect(() =>

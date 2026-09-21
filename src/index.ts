@@ -23,7 +23,9 @@ export {
   formatHttpxUrl,
   parseHttpxUrl,
   resolveHttpxUrl,
+  resourceForm,
   type HttpxUrl,
+  type ResourceForm,
 } from "./urls.js";
 export {
   bareJid,

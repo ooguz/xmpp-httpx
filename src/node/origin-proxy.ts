@@ -43,6 +43,22 @@ export function createOriginProxyHandler(
 
   return async (req) => {
     const url = new URL(req.resource, base);
+    // A *reverse* proxy fronts one origin, and `new URL(ref, base)` drops the
+    // base for anything that carries its own authority — an absolute-form
+    // target (`https://169.254.169.254/…`) or a protocol-relative one
+    // (`//169.254.169.254/…`, which has always passed the origin-form check
+    // because it starts with "/"). Either one would make the requester, not
+    // the operator, choose what this gateway fetches from inside its network,
+    // with `x-httpx-from` naming an authenticated JID to whoever answers.
+    // A forward proxy is a different handler with its own destination policy.
+    if (url.origin !== base.origin) {
+      return {
+        status: 400,
+        statusMessage: "Bad Request",
+        headers: { "content-type": "text/plain; charset=utf-8" },
+        body: "request-target names a different origin\n",
+      };
+    }
 
     const headers = new Headers(req.headers);
     for (const name of HOP_BY_HOP) headers.delete(name);

@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_BUFFERED_BYTES,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
   HTTP_VERSION,
+  MIN_CHUNK_SIZE,
   NS_HTTPX,
   NS_STANZAS,
 } from "../constants.js";
@@ -49,7 +50,7 @@ import {
   streamFromBytes,
   textEncoder,
 } from "../util/bytes.js";
-import { formatHttpxUrl } from "../urls.js";
+import { formatHttpxUrl, resourceForm } from "../urls.js";
 import { denyAllWithWarning, type AuthorizeFn } from "./policy.js";
 
 export interface HttpxServerRequest {
@@ -60,7 +61,11 @@ export interface HttpxServerRequest {
   method: HttpMethod;
   /** Path + optional query as sent in <req resource=…>. */
   resource: string;
-  /** Reconstructed httpx:// URL, for routing convenience. */
+  /**
+   * Reconstructed httpx:// URL, for routing convenience. For the two forms
+   * that already name their own target — absolute-form, and CONNECT's
+   * authority-form — this is the `resource` verbatim instead.
+   */
   url: string;
   headers: Headers;
   body: ReadableStream<Uint8Array> | null;
@@ -99,6 +104,21 @@ export interface HttpxServerOptions {
   maxRequestBodyBytes?: number;
   /** Idle timeout for streamed request bodies. */
   idleTimeoutMs?: number;
+  /**
+   * IBB blocks kept in flight when streaming a response body, and the number
+   * an inbound request body may run ahead before acks are withheld. Default
+   * 8. One block costs a round trip, so this is the multiplier on a
+   * high-latency path; 1 restores the block-at-a-time sender.
+   */
+  ibbWindow?: number;
+  /**
+   * Ceiling on the decoded bytes per IBB block this server sends. The block
+   * size is the requester's call — it is the side whose stanza limit has to
+   * carry the base64 — so this only ever lowers what `<req maxChunkSize=…>`
+   * asked for, never raises it. Derive the requester's side with
+   * `stanzaBudgets(maxStanzaBytes)`.
+   */
+  ibbBlockSize?: number;
   /** Answer disco#info with the urn:xmpp:http feature. Default true. */
   advertise?: boolean;
   /**
@@ -165,6 +185,11 @@ export class HttpxServer {
     this.#started = true;
     this.#router = ChunkRouter.acquire(this.#session);
     this.#ibb = IbbManager.acquire(this.#session);
+    if (this.#options.ibbWindow !== undefined) {
+      // Per session, not per stream: an <open> arrives before any per-stream
+      // setup exists. Shared with anything else using IBB on this session.
+      this.#ibb.receiveWindowBlocks = this.#options.ibbWindow;
+    }
     this.#registry = createDefaultRegistry(
       this.#session,
       this.#options.socks5 !== undefined ? { socks5: this.#options.socks5 } : undefined,
@@ -572,7 +597,16 @@ export class HttpxServer {
             streamContext.peer,
             streamContext.ourJid,
             sid,
-            decision.blockSize,
+            // A cap, never a raise: the requester's stanza limit is what
+            // has to carry the base64. Clamped so a nonsense option cannot
+            // produce a block below the XEP's floor.
+            Math.max(
+              MIN_CHUNK_SIZE,
+              Math.min(
+                decision.blockSize,
+                this.#options.ibbBlockSize ?? decision.blockSize,
+              ),
+            ),
             this.#materializeStream(normalized),
           );
           break;
@@ -656,6 +690,9 @@ export class HttpxServer {
         const out = await ibb.openOutgoing(peer, {
           sid,
           blockSize,
+          ...(this.#options.ibbWindow !== undefined
+            ? { window: this.#options.ibbWindow }
+            : {}),
           ...(ourJid !== "" ? { from: ourJid } : {}),
         });
         try {
@@ -686,6 +723,12 @@ function iqError(type: "cancel" | "modify" | "wait", condition: string): Element
 }
 
 function resourceToUrl(jid: string, resource: string): string {
+  // Absolute-form already names its own target, and authority-form names a
+  // host and port rather than anything with a path: neither becomes an
+  // httpx:// URL without inventing something. Pass them through verbatim.
+  const form = resourceForm(resource);
+  if (form === "absolute" || form === "authority") return resource;
+
   const queryIndex = resource.indexOf("?");
   if (queryIndex === -1) {
     return formatHttpxUrl({ jid, path: resource });

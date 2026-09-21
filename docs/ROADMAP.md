@@ -365,6 +365,55 @@ mobile) is researched and written down.
   Dillo's: no POST (plugins receive only the URL), no revalidation.
   Reasoning in [dillo-plugin.md](dillo-plugin.md).
 
+## Phase 13: n146 groundwork
+
+Goal: the library work the [n146](https://github.com/ooguz/n146) web-over-XMPP
+proxy needs from this side, in the order its design document asks for it
+(`docs/design.md` §5.2). Nothing here is proxy-specific — every item is a
+throughput or correctness gap that happens to bite hardest when a browser is
+on the other end.
+
+- [x] **Windowed IBB sending** (M, 2026-09-21): `window` blocks in flight, the
+  IQ result of block k releasing block k+window; `ibbWindow` and
+  `ibbBlockSize` on both `HttpxClient` and `HttpxServer`, block size still
+  derived from the peer's `maxChunkSize` (i.e. from `stanzaBudgets()`, i.e.
+  from XEP-0478 where a server advertises it). Ordering holds because taking,
+  encoding and sending a block is one synchronous step; a block's IQ error
+  closes the stream with the *earliest* failure in send order; a receiver that
+  stops reading still stops the sender dead, and one that is deliberately
+  withholding acks now stretches its own idle deadline across the window
+  instead of timing out a healthy stream. The receiver's queue grew the other
+  half of the window — without it the first 64 KiB block drives `desiredSize`
+  to 0 and the window collapses back to one block per round trip. On a
+  simulated 100 ms path a 1 MiB body goes from 40.2 KB/s to 2.41 MB/s (window
+  8, 64 KiB blocks), and over a real Prosody 8 MiB of IBB now moves at
+  9.17 MB/s — past `chunkedBase64` for the first time. Numbers in
+  [architecture.md](architecture.md#throughput).
+- [x] **`CONNECT` and the request-target forms** (S, 2026-09-21): `CONNECT` in
+  `HTTP_METHODS` (a deliberate departure from XEP-0332 v0.5.1, recorded in
+  [protocol-notes.md](protocol-notes.md)), and `resource` validation for
+  authority-form (`example.org:443`, `CONNECT` only, per RFC 9112 §3.2.3) and
+  absolute-form (`https://example.org/x`). Origin-form decodes exactly as
+  before.
+- [ ] **Bidirectional stream body** (M): a duplex handle over one IBB or S5B
+  session. Bodies are one-directional today, and a tunnel is not.
+- [ ] **Fair scheduling** (M): many concurrent streams share one XMPP
+  connection; the sender should round-robin blocks across active streams so
+  one large download cannot starve twenty small ones. A per-session scheduler
+  in front of the IBB sender — the window makes this both possible and
+  necessary, since a single stream can now hold several slots.
+- [ ] **Tunnel-aware watchdogs** (S): the idle timeout is right for a body and
+  wrong for a tunnel, which is idle by nature. Needs to be selectable per
+  stream rather than per manager.
+- [ ] **XEP-0198 resumption** (M): stream management with resumption keeps
+  long-lived streams alive across a brief network loss. Also bounds the
+  retained outbound queue, which a saturated windowed sender grows (see
+  [architecture.md](architecture.md#throughput)).
+- [ ] **XEP-0478 stream limits** (S): nothing in the `@xmpp` stack parses the
+  `<limits/>` stream feature, so `stanzaBudgets()` is fed by hand today. It
+  arrives before resource binding, so reading it means a nonza listener
+  installed before `entity.start()` resolves.
+
 ## Cross-cutting quick wins (any time)
 
 - [x] `HttpxResponse.formData()`, which delegates to the platform's parser, so

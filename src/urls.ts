@@ -97,3 +97,60 @@ export function formatHttpxUrl(parts: {
     search === "" || search.startsWith("?") ? search : `?${search}`;
   return `httpx://${parts.jid}${normalizedPath}${normalizedSearch}`;
 }
+
+/**
+ * Which of RFC 9112 §3.2's request-target forms a `<req resource=…>` uses.
+ * XEP-0332 only ever shows origin-form; the other three exist because a
+ * proxy needs them — CONNECT names an authority, a forward proxy is handed
+ * an absolute URI, and OPTIONS may address the server itself.
+ */
+export type ResourceForm = "origin" | "absolute" | "authority" | "asterisk";
+
+// Authority-form: host[:port], no userinfo, no path, no query. The host is a
+// reg-name, an IPv4 literal or a bracketed IPv6 literal; the port, when
+// present, is 1-65535. Deliberately stricter than a URL parser, which would
+// happily read "evil.com:80/../x" or "user@host:80" as an authority.
+const REG_NAME = /^[A-Za-z0-9._~!$&'()*+,;=-]+$/;
+const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
+
+function isAuthority(resource: string): boolean {
+  const colon = resource.lastIndexOf(":");
+  const host = colon === -1 ? resource : resource.slice(0, colon);
+  const port = colon === -1 ? "" : resource.slice(colon + 1);
+  if (host.length === 0) return false;
+  // A bracketed IPv6 literal contains colons of its own; the port separator
+  // is only the one after the closing bracket.
+  if (host.startsWith("[")) {
+    if (!IPV6_LITERAL.test(host)) return false;
+  } else if (!REG_NAME.test(host) || host.includes("[") || host.includes("]")) {
+    return false;
+  }
+  if (colon === -1) return false; // host alone is not authority-form
+  if (!/^[0-9]{1,5}$/.test(port)) return false;
+  const value = Number(port);
+  return value >= 1 && value <= 65535;
+}
+
+/**
+ * Classifies a request target, or returns undefined when it is none of the
+ * four forms. Origin-form is accepted exactly as before — anything starting
+ * with "/" — so nothing that used to decode stops decoding.
+ */
+export function resourceForm(resource: string): ResourceForm | undefined {
+  if (resource === "*") return "asterisk";
+  if (resource.startsWith("/")) return "origin";
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(resource)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(resource);
+    } catch {
+      return undefined;
+    }
+    // "https://" parses on some runtimes with an empty host; a target with
+    // no authority cannot be routed anywhere.
+    if (parsed.hostname === "") return undefined;
+    if (resource.includes("#")) return undefined; // targets carry no fragment
+    return "absolute";
+  }
+  return isAuthority(resource) ? "authority" : undefined;
+}

@@ -57,6 +57,22 @@ export const DEFAULT_MAX_BUFFERED_BYTES = 1024 * 1024;
 export const DEFAULT_MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024;
 
 export const DEFAULT_IBB_BLOCK_SIZE = 4096;
+/**
+ * IBB blocks allowed in flight — unacknowledged — at once. Each block costs a
+ * full IQ round trip, so an unwindowed sender moves exactly one block per RTT:
+ * 4 KiB / 100 ms ≈ 40 KB/s however fat the pipe. Eight in flight multiplies
+ * that by eight, and the receiver's ack-withholding is still what stops a
+ * sender outrunning a slow consumer — the window only sets how much slack it
+ * has before that bites.
+ */
+export const DEFAULT_IBB_WINDOW = 8;
+/**
+ * Upper bound on a configured window. It bounds memory (the receiver's buffer
+ * and the sender's outstanding stanzas both scale with it) and, because the
+ * per-block deadline scales with the window, it also bounds how long a dead
+ * peer can go unnoticed.
+ */
+export const MAX_IBB_WINDOW = 256;
 /** How long an unclaimed incoming IBB <open> is held before being refused. */
 export const DEFAULT_IBB_ACCEPT_TIMEOUT_MS = 5_000;
 /** Unclaimed sipub publications / jingle offers expire after this. */
