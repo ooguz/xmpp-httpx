@@ -1,6 +1,6 @@
 # Roadmap: next possible phases and tasks
 
-Status today (v0.8.0, 2026-09-12; repo pushed to `ooguz/xmpp-httpx`
+Status today (v0.9.0, 2026-09-22; repo pushed to `ooguz/xmpp-httpx`
 2026-08-29): the library implements all seven XEP-0332 body transports with
 client + server, discovery + entity caps, SOCKS5 bytestreams, Content-Encoding,
 a Prosody E2E suite, browser-mode CI, and the Firefox/Chromium WebExtension
@@ -22,11 +22,11 @@ days, **L** ≈ a week+. Marks: `[x]` done, `[~]` partially done, `[ ]` open.
 Goal: make the library consumable and visible. XEP-0332 explicitly asks for
 implementations to revive its standards process; be that implementation.
 
-- [ ] **Publish `xmpp-httpx@0.8.0` to npm** (S): fully prepared (metadata,
-  `prepublishOnly` gate, pack verified, v0.8.0 tagged). Owner action:
+- [ ] **Publish `xmpp-httpx@0.9.0` to npm** (S): fully prepared (metadata,
+  `prepublishOnly` gate, pack verified, v0.9.0 tagged). Owner action:
   `npm login && npm publish`, see [RELEASING.md](../RELEASING.md).
 - [x] **Git remote + CI activation** (S): pushed to `ooguz/xmpp-httpx`
-  2026-08-29 (private at first), `main` plus the `v0.7.0` and `v0.8.0` tags;
+  2026-08-29 (private at first), `main` plus the `v0.7.0`, `v0.8.0` and `v0.9.0` tags;
   CI runs on pushes. Made public on 2026-09-15, with GitHub Pages enabled
   from the workflow so the `api-docs` job has a target.
 - [x] **API reference site** (M): typedoc (`npm run docs:api`) verified

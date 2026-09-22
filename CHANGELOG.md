@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — 2026-09-22
 
 - **Windowed IBB sending.** Up to `ibbWindow` blocks (default 8) are in flight
   at once: the IQ result of block k releases block k+window, instead of every
