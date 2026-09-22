@@ -81,6 +81,83 @@ rather than an accident.
 - A premature `<close/>` is indistinguishable from a complete one at the
   protocol level; consumers that need integrity should compare against
   `Content-Length`.
+- **Idle watchdogs are per stream.** A stream carries its own idle timeout
+  (or `false`); unset, it reads the manager's `idleTimeoutMs` as it always
+  did. `false` turns off every timer that fires on *absence of traffic* — the
+  inbound idle timer and the stretched deadline of a receiver withholding
+  acks — and is the default for a duplex. The sender's per-block ack deadline
+  is not an idle timer and stays: it runs only while this side has bytes
+  outstanding, and a peer that holds them unanswered for `idleTimeoutMs ×
+  window` is stuck, not idle. (A peer that disconnects is noticed sooner:
+  its server bounces the IQs.)
+
+### Duplex streams (CONNECT tunnels)
+
+- One IBB session is used in **both directions**: the opener's sid, the
+  opener's `block-size` for both senders, and one `seq` counter per
+  direction, each starting at 0. XEP-0047 never forbids the responder sending
+  `<data/>` on the sid, and its `seq` rule is per sender; nothing new goes on
+  the wire. Only the opener sends `<open/>` — the acceptor adopts the sid.
+- The opener registers its inbound half **before** its `<open/>` leaves, so
+  the acceptor may send the moment it accepts, even before the opener has
+  seen the `<open/>`'s result.
+- **No half-close.** Either side's `<close/>` ends both directions: the peer's
+  reader ends cleanly, its later `write()`s reject ("closed by peer"), and
+  its `close()` resolves without sending a second `<close/>`. Bytes the peer
+  still had in flight when ours arrived are acked and dropped. TLS never
+  half-closes and SSH tolerates it (design §4.2). Cancelling the reader is an
+  abort, since nobody is left to read the answer.
+- **Crossing `<close/>`s.** Both sides may close at once. The side that sends
+  `<close/>` keeps its inbound entry as a tombstone — finished, answering —
+  until its own `<close/>` is answered; the peer's `<close/>` then gets a
+  result instead of `item-not-found`, and both `close()` calls succeed. The
+  peer's crossing `<close/>` always reaches us before its answer to ours, so
+  "the peer closed first" is known by the time our `<close/>` settles.
+- **Every teardown tells the peer.** A plain sender that fails stays silent
+  until it is next written or closed, and the peer's watchdog reaps its half.
+  A duplex has neither to rely on, so a refused block ends both halves at
+  once and sends `<close/>`, best effort. So does an `<open/>` that timed
+  out, since the peer may have accepted it. `abort()` during a draining
+  `close()` stops that close's pump before its `<close/>`, so no `<data/>`
+  ever follows one; a second `close()` joins the first.
+- **A receiver refuses before it closes.** A duplex that finds a fatal error
+  in an inbound block (a `seq` gap, bad base64) answers the block with its
+  IQ error first and tears down on the next macrotask; otherwise its
+  `<close/>` would overtake the refusal and the sender would take its refused
+  block for an ordinary post-close discard. The sender, for its part, only
+  forgives `item-not-found` after a peer `<close/>`.
+- A numeric idle timeout on a duplex counts silence in both directions: acks
+  for our own blocks re-arm it, so an upload with nothing coming back is not
+  idle.
+- **Writes are flushed.** A body sender holds a sub-block tail until the next
+  write or `close()`; a duplex sends it at once. A tunnel is interactive — a
+  500-byte ClientHello is followed by nothing until the ServerHello — so a
+  held tail is a deadlock. Coalescing is kept where it is free: bytes written
+  while the window is full leave in full blocks.
+- **CONNECT on the server.** The handler decides the status. A 2xx whose
+  handler result carries `tunnel` becomes `<resp statusCode='200'
+  statusMessage='Connection Established'>` with `<data><ibb sid/></data>`,
+  and the server opens that sid as a duplex once the reply has gone. Any
+  other answer is an ordinary response (typically 403/502/504) and `tunnel`
+  is never called. A `CONNECT` carrying `<data>` is answered 400 (RFC 9110
+  §9.3.6: no content); one with `ibb='false'` is answered 501 before the
+  handler runs, because a tunnel is one IBB stream and there is no point
+  dialling a destination for a requester that refuses it. `tunnel` on any
+  other method is a handler bug, answered 500. If the stream cannot be
+  opened, `tunnel` is still called — with a tunnel that is already dead — so
+  the handler's ordinary error path is where it closes the destination.
+- **CONNECT on the client** is `HttpxClient.connect()`, not `request()`: the
+  answer is a stream in both directions and `request()` can only return a
+  body. It sends `sipub='false' jingle='false'` (and `ibb` at its default,
+  true). A 2xx without an IBB stream is a protocol error rather than a silent
+  dead pipe — and the server never sends one: a 2xx answer to `CONNECT`
+  without a `tunnel` callback is a handler bug, answered 500.
+- **Liveness is the application's.** With the watchdog off, an exit does not
+  notice a requester that vanishes while its tunnel is idle — no traffic, no
+  outstanding acks, no `<close/>`. Its server bounces the next IQ once there
+  is one; until then, presence or XEP-0199 is how an exit finds out, and that
+  is n146's job, not this library's (design §4.2). A tunnel with bytes in
+  flight is bounded by the sender's ack deadline, `idleTimeoutMs × window`.
 
 ## sipub (XEP-0137 over XEP-0095 SI)
 
@@ -234,6 +311,13 @@ implementation has to agree with:
   errors and timeouts are treated as unknown and the request proceeds,
   because many deployments answer disco poorly and a hard failure would make
   the library unusable against them. Disable with `discover: false`.
+- `urn:xmpp:http#absolute-form` is advertised alongside `urn:xmpp:http`
+  (n146 design §4.3): v0.5.1 defines `resource` as a path, so a requester
+  may send absolute-form only to a peer that says it takes it. Every entity
+  using this library decodes it, so every entity advertises it; what a
+  handler does with the URL is the application's concern.
+  `DiscoCache.supports(jid, feature)` checks this, or any feature, from the
+  same cached disco answer that `supportsHttpx()` uses.
 - `advertiseHttpx()` / `HttpxServer` register the session's only disco#info
   responder. Applications with their own disco should set
   `advertise: false` and add `urn:xmpp:http` to their own feature list.

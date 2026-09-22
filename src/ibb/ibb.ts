@@ -77,6 +77,42 @@ export interface IbbInStream {
   readonly readable: ReadableStream<Uint8Array>;
 }
 
+/**
+ * One IBB session used in both directions: `readable` is what the peer sends,
+ * write() is what we send, on the same sid with independent seq counters.
+ *
+ * There is no half-close. close() and abort() end both directions, and so
+ * does the peer's <close/>: `readable` then ends cleanly and later writes
+ * reject. Cancelling `readable` is an abort — a tunnel whose reader has gone
+ * has nobody left to read the answer.
+ */
+export interface IbbDuplex extends IbbOutStream {
+  /** The peer's full JID. */
+  readonly peer: string;
+  readonly blockSize: number;
+  readonly readable: ReadableStream<Uint8Array>;
+}
+
+/**
+ * Per-stream watchdog setting. A number is the stream's idle timeout; `false`
+ * turns the idle watchdog off — for a tunnel, which is idle by nature (a
+ * WebSocket can sit silent for hours) and whose liveness comes from the XMPP
+ * session and from the TCP side instead. Off means *every* timer that fires on
+ * absence of traffic: the inbound idle timer and the stretched deadline of a
+ * receiver withholding acks. The sender's per-block ack deadline is not one of
+ * them and stays — it only runs while bytes are outstanding.
+ */
+export type IbbIdleTimeout = number | false;
+
+export interface DuplexOptions {
+  /** Blocks in flight on our sending half; see openOutgoing. */
+  window?: number;
+  /** Our JID, for components. */
+  from?: string;
+  /** Default `false` — a duplex is a tunnel unless told otherwise. */
+  idleTimeoutMs?: IbbIdleTimeout;
+}
+
 interface InStreamState {
   controller: ReadableStreamDefaultController<Uint8Array>;
   expectedSeq: number;
@@ -85,19 +121,53 @@ interface InStreamState {
   /** Resolvers waiting for the consumer to relieve backpressure. */
   pullWaiters: Array<() => void>;
   cancelled: boolean;
+  /**
+   * Per stream, not per manager: a tunnel's `false` is not a body's 30 s.
+   * Undefined reads the manager's idleTimeoutMs at each arming, which is
+   * exactly what every stream did before this field existed.
+   */
+  idleTimeoutMs: IbbIdleTimeout | undefined;
+  /** Duplex only: the peer's <close/> also ends our sending half. */
+  onPeerClose?: () => void;
+  /** Duplex only: a fatal inbound error (seq gap, idle) ends the whole stream. */
+  onFail?: (error: Error) => void;
+  /** Duplex only: replaces the default "send <close/>" on cancel. */
+  onCancel?: (reason: unknown) => void;
 }
 
-interface ParkedOpen {
+interface OpenSource {
   ctx: IqContext;
   blockSize: number;
+}
+
+interface ParkedOpen extends OpenSource {
   accept: (result: Element | boolean) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
 interface Expectation {
-  resolve: (stream: IbbInStream) => void;
+  /** Builds the stream for the arrived <open> — plain inbound or duplex. */
+  claim: (source: OpenSource) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+interface InboundDescriptor {
+  /** The peer's full JID. */
+  from: string;
+  /** Our JID as the peer addressed it — needed on components. */
+  ourJid: string | undefined;
+  sid: string;
+  blockSize: number;
+}
+
+function describeOpen(source: OpenSource): InboundDescriptor {
+  return {
+    from: source.ctx.from?.toString() ?? "",
+    ourJid: source.ctx.to?.toString(),
+    sid: source.ctx.element.attrs["sid"] ?? "",
+    blockSize: source.blockSize,
+  };
 }
 
 function iqError(
@@ -203,29 +273,129 @@ export class IbbManager {
   ): Promise<IbbOutStream> {
     const sid = options?.sid ?? generateId("ibb");
     const blockSize = options?.blockSize ?? DEFAULT_IBB_BLOCK_SIZE;
-    const window = clampWindow(options?.window);
     const from = options?.from;
+    await this.#request(to, from, this.#openElement(sid, blockSize));
+    return this.#createOutStream(to, from, sid, blockSize, options?.window)
+      .stream;
+  }
+
+  /**
+   * Opens a stream that carries bytes both ways (design: one sid, two
+   * directions, each with its own seq counter — XEP-0047's seq is per
+   * sender). The inbound half is registered *before* the <open> leaves, so
+   * the peer may start sending the moment it accepts.
+   *
+   * There is no half-close: close() from either side ends both directions,
+   * which is what a CONNECT tunnel needs (TLS never half-closes).
+   */
+  async openDuplex(
+    to: string,
+    options?: DuplexOptions & { sid?: string; blockSize?: number },
+  ): Promise<IbbDuplex> {
+    const sid = options?.sid ?? generateId("ibb");
+    const blockSize = options?.blockSize ?? DEFAULT_IBB_BLOCK_SIZE;
+    const from = options?.from;
+    const key = this.#key(to, sid);
+    if (
+      this.#inStreams.has(key) ||
+      this.#parkedOpens.has(key) ||
+      this.#expectations.has(key)
+    ) {
+      throw new HttpxError("stream-error", `IBB sid ${sid} is already in use`);
+    }
+    const duplex = this.#createDuplex(key, {
+      peer: to,
+      from,
+      sid,
+      blockSize,
+      window: options?.window,
+      idleTimeoutMs: options?.idleTimeoutMs,
+    });
+    try {
+      await this.#request(to, from, this.#openElement(sid, blockSize));
+    } catch (err) {
+      // Refused: nothing was ever sent on it, so there is no <close/> to send
+      // — just drop the half registered above. A *timeout* is different: the
+      // peer may well have accepted, and with its watchdog off it would keep
+      // that half for the session unless told.
+      duplex.discard(err instanceof Error ? err : new Error(String(err)));
+      if (err instanceof HttpxError && err.code === "timeout") {
+        this.#request(to, from, xml("close", { xmlns: NS_IBB, sid })).catch(() => {});
+      }
+      throw err;
+    }
+    return duplex.handle;
+  }
+
+  #openElement(sid: string, blockSize: number): Element {
+    return xml("open", {
+      xmlns: NS_IBB,
+      sid,
+      "block-size": String(blockSize),
+      stanza: "iq",
+    });
+  }
+
+  /**
+   * The sending half, for a sid that is already open — by our own <open>
+   * (openOutgoing, openDuplex) or by the peer's (expectDuplex). Everything
+   * below the first line is the windowed sender exactly as it was; the only
+   * additions are the peer-close exit and the hook a duplex uses to retire its
+   * inbound half just before our own <close/> leaves.
+   */
+  #createOutStream(
+    to: string,
+    from: string | undefined,
+    sid: string,
+    blockSize: number,
+    requestedWindow: number | undefined,
+    hooks?: {
+      /** Runs once, right before our <close/> is sent (by close or abort). */
+      beforeSendClose?: (reason?: Error) => void;
+      /**
+       * Send what each write() leaves over instead of holding it for the next
+       * write or close(). A body is written to completion and then closed, so
+       * holding a sub-block tail costs nothing; a tunnel is interactive, and a
+       * 500-byte TLS ClientHello held for a write that only comes after the
+       * answer would deadlock it. Coalescing survives: bytes written while
+       * the window is full accumulate and leave in full blocks.
+       */
+      flushEachWrite?: boolean;
+      /**
+       * A block failed and the stream is now failed. Called once, from the
+       * rejection that latched it — so a duplex can tear down its other half
+       * even when nobody is writing or closing to notice.
+       */
+      onFail?: (error: Error) => void;
+      /** An ack arrived: the peer is alive and taking our bytes. */
+      onActivity?: () => void;
+    },
+  ): { stream: IbbOutStream; peerClosed: () => void } {
+    const window = clampWindow(requestedWindow);
     // Each block carries its own deadline, started when it was *dispatched* —
     // so the last block of a window has been waiting for the whole window to
     // drain by the time its own ack is due. Scaling the deadline by the window
     // restores what the old sender gave every block: idleTimeoutMs of patience
     // measured from its predecessor's ack. Without it, windowing would kill
     // exactly the slow consumers that backpressure exists to serve.
+    //
+    // This is not an idle watchdog and a tunnel keeps it: it only runs while
+    // this side has bytes outstanding, and a peer that holds them unanswered
+    // for window x idleTimeoutMs is stuck, not idle.
     const blockTimeoutMs = this.idleTimeoutMs * window;
-
-    const open = xml("open", {
-      xmlns: NS_IBB,
-      sid,
-      "block-size": String(blockSize),
-      stanza: "iq",
-    });
-    await this.#request(to, from, open);
 
     let seq = 0;
     /** Blocks dispatched so far. Unwrapped, unlike seq, so it orders failures. */
     let dispatched = 0;
     const buffered = new BlockBuffer();
     let closed = false;
+    /**
+     * The peer sent <close/> on this sid (only possible for a duplex: a plain
+     * sender's sid has no inbound half to receive it). The stream is over in
+     * both directions; what we still had in flight is lost, as it is when a
+     * TCP peer closes — there is no half-close to wait in.
+     */
+    let closedByPeer = false;
     /**
      * The failure that closed the stream, latched to the *earliest* block
      * that failed. A dead receiver rejects every outstanding block and each
@@ -266,20 +436,40 @@ export class IbbManager {
       // The rejection handler is attached here, at dispatch, not where the
       // block is awaited: with a window the other in-flight blocks reject
       // with nobody awaiting them, and an unhandled rejection is fatal.
-      this.#request(to, from, data, blockTimeoutMs).then(settle, (err: unknown) => {
-        if (!failed || ordinal < failed.ordinal) {
-          failed = { ordinal, error: fromXmppError(err) };
-        }
-        settle();
-      });
+      this.#request(to, from, data, blockTimeoutMs).then(
+        () => {
+          hooks?.onActivity?.();
+          settle();
+        },
+        (err: unknown) => {
+          const error = fromXmppError(err);
+          // After the peer's <close/>, a block it never took (answered
+          // item-not-found once its state is gone) is the ordinary cost of
+          // the stream ending. Any other refusal is still a refusal.
+          const discarded = closedByPeer && error.code === "not-found";
+          if (!discarded && (!failed || ordinal < failed.ordinal)) {
+            const first = !failed;
+            failed = { ordinal, error };
+            if (first) hooks?.onFail?.(error);
+          }
+          settle();
+        },
+      );
     };
 
     const throwIfFailed = () => {
       if (failed) throw failed.error;
     };
 
+    const throwIfPeerClosed = () => {
+      if (closedByPeer) {
+        throw new HttpxError("stream-error", "IBB stream closed by peer");
+      }
+    };
+
     const ensureUsable = () => {
       throwIfFailed();
+      throwIfPeerClosed();
       if (closed) throw new HttpxError("stream-error", "IBB stream closed");
     };
 
@@ -287,6 +477,7 @@ export class IbbManager {
     const pump = async (take: () => Uint8Array, hasBlock: () => boolean) => {
       while (hasBlock()) {
         throwIfFailed();
+        throwIfPeerClosed();
         if (inFlight >= window) {
           await new Promise<void>((resolve) => slotWaiters.push(resolve));
           continue; // re-check: another writer may have taken the slot
@@ -295,60 +486,101 @@ export class IbbManager {
       }
     };
 
-    const sendClose = async () => {
+    /** Our <close/> is on the wire; nothing may follow it. */
+    let closeSent = false;
+    const sendClose = async (reason?: Error) => {
+      closeSent = true;
+      hooks?.beforeSendClose?.(reason);
       const close = xml("close", { xmlns: NS_IBB, sid });
       await this.#request(to, from, close);
     };
 
-    return {
+    const stream: IbbOutStream = {
       sid,
       write: async (bytes: Uint8Array): Promise<void> => {
         ensureUsable();
         buffered.push(bytes);
+        if (hooks?.flushEachWrite) {
+          // Tested at take time, like close()'s tail (see there).
+          await pump(
+            () => buffered.take(Math.min(blockSize, buffered.size)),
+            () => buffered.size > 0,
+          );
+          return;
+        }
         await pump(
           () => buffered.take(blockSize),
           () => buffered.size >= blockSize,
         );
       },
       close: async (): Promise<void> => {
+        // A block that failed before the peer closed is still this stream's
+        // failure; only then does "the peer already closed it" mean done.
+        throwIfFailed();
+        if (closedByPeer) return;
         ensureUsable();
         closed = true;
         // Tested at take time, not latched on entry: an un-awaited write()
         // racing this one can drain the buffer while close()'s pump is parked
         // on a window slot, and a latched "there was a remainder" would then
         // send a zero-length block, burning a seq and a round trip.
-        await pump(
-          () => buffered.drain(),
-          () => buffered.size > 0,
-        );
-        while (inFlight > 0) {
+        try {
+          await pump(
+            () => buffered.drain(),
+            () => buffered.size > 0,
+          );
+        } catch (err) {
+          if (!failed && closedByPeer) return;
+          throw err;
+        }
+        // An abort() landing mid-drain ends the wait: it has sent the one
+        // <close/> already, and its reason is what this close() reports.
+        while (inFlight > 0 && !closedByPeer && failed?.ordinal !== -1) {
           await new Promise<void>((resolve) => drainWaiters.push(resolve));
         }
         // Only now is every block accounted for: a caller awaiting close()
         // gets the same delivery guarantee it had when write() awaited each
         // block's own ack.
         throwIfFailed();
+        if (closedByPeer) return;
         try {
           await sendClose();
         } catch (err) {
+          // The two <close/>s crossed on the wire: the peer's reached us
+          // before its answer to ours, so the stream is closed either way.
+          if (closedByPeer) return;
           failed ??= { ordinal: dispatched, error: fromXmppError(err) };
           throw failed.error;
         }
       },
       abort: async (reason: Error): Promise<void> => {
-        if (closed || failed) return;
+        // Not `closed`: a close() still draining has not sent its <close/>,
+        // and an abort then must stop its pump — or the pump keeps sending
+        // <data/> after the abort's <close/>.
+        if (closeSent || failed || closedByPeer) return;
         // Ordinal -1: no block has failed yet (or `failed` would be set), and
         // the local reason is the true cause — a later rejection from a block
         // already in flight must not overwrite it.
         failed = { ordinal: -1, error: reason };
         wake(slotWaiters.splice(0));
+        wake(drainWaiters.splice(0));
         try {
-          await sendClose();
+          await sendClose(reason);
         } catch {
           // The peer may already be gone; nothing more to do.
         }
       },
     };
+
+    const peerClosed = () => {
+      if (closedByPeer) return;
+      closedByPeer = true;
+      // Nothing will ever free a slot or drain the window for us now.
+      wake(slotWaiters.splice(0));
+      wake(drainWaiters.splice(0));
+    };
+
+    return { stream, peerClosed };
   }
 
   async #request(
@@ -378,33 +610,77 @@ export class IbbManager {
    * Announces that an <open> for `sid` from `from` (bare-JID matched) is
    * expected and returns the stream once it arrives. If the <open> already
    * arrived and is parked, it is claimed immediately.
+   *
+   * `timeoutMs` bounds the wait for the <open>; `idleTimeoutMs` is the
+   * stream's own watchdog afterwards. Both default to the manager's
+   * idleTimeoutMs, which is what every stream used before either existed.
    */
   expectIncoming(
     from: string,
     sid: string,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; idleTimeoutMs?: IbbIdleTimeout },
   ): Promise<IbbInStream> {
     const key = this.#key(from, sid);
+    const idleTimeoutMs = options?.idleTimeoutMs;
+    return this.#expect(key, sid, options?.timeoutMs, (source) =>
+      this.#createInStream(key, source, { idleTimeoutMs }),
+    );
+  }
 
+  /**
+   * The accepting side of openDuplex(): waits for the peer's <open> on `sid`
+   * and answers it with a stream we can also send on. Our sending half
+   * adopts the peer's sid and block-size — it never sends an <open> of its
+   * own, because the sid is already open.
+   */
+  expectDuplex(
+    from: string,
+    sid: string,
+    options?: DuplexOptions & { timeoutMs?: number },
+  ): Promise<IbbDuplex> {
+    const key = this.#key(from, sid);
+    return this.#expect(key, sid, options?.timeoutMs, (source) => {
+      const peer = source.ctx.from?.toString() ?? from;
+      const ourJid = options?.from ?? source.ctx.to?.toString();
+      return this.#createDuplex(key, {
+        peer,
+        from: ourJid,
+        sid,
+        blockSize: source.blockSize,
+        window: options?.window,
+        idleTimeoutMs: options?.idleTimeoutMs,
+      }).handle;
+    });
+  }
+
+  #expect<T>(
+    key: string,
+    sid: string,
+    timeoutMs: number | undefined,
+    build: (source: OpenSource) => T,
+  ): Promise<T> {
     const parked = this.#parkedOpens.get(key);
     if (parked) {
       this.#parkedOpens.delete(key);
       clearTimeout(parked.timer);
-      const stream = this.#createInStream(key, parked);
+      const stream = build(parked);
       parked.accept(true);
       return Promise.resolve(stream);
     }
 
-    return new Promise<IbbInStream>((resolve, reject) => {
-      const timeoutMs = options?.timeoutMs ?? this.idleTimeoutMs;
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#expectations.delete(key);
         reject(
           new HttpxError("timeout", `IBB open for ${sid} never arrived`),
         );
-      }, timeoutMs);
+      }, timeoutMs ?? this.idleTimeoutMs);
       (timer as { unref?: () => void }).unref?.();
-      this.#expectations.set(key, { resolve, reject, timer });
+      this.#expectations.set(key, {
+        claim: (source) => resolve(build(source)),
+        reject,
+        timer,
+      });
     });
   }
 
@@ -445,8 +721,7 @@ export class IbbManager {
     if (expectation) {
       this.#expectations.delete(key);
       if (expectation.timer !== undefined) clearTimeout(expectation.timer);
-      const stream = this.#createInStream(key, { ctx, blockSize });
-      expectation.resolve(stream);
+      expectation.claim({ ctx, blockSize });
       return true;
     }
 
@@ -469,10 +744,16 @@ export class IbbManager {
 
   #createInStream(
     key: string,
-    source: { ctx: IqContext; blockSize: number },
+    source: OpenSource | InboundDescriptor,
+    options: {
+      idleTimeoutMs: IbbIdleTimeout | undefined;
+      onPeerClose?: () => void;
+      onCancel?: (reason: unknown) => void;
+      onFail?: (error: Error) => void;
+    },
   ): IbbInStream {
-    const from = source.ctx.from?.toString() ?? "";
-    const sid = source.ctx.element.attrs["sid"] ?? "";
+    const { from, ourJid, sid, blockSize } =
+      "ctx" in source ? describeOpen(source) : source;
 
     const state: InStreamState = {
       controller: undefined as unknown as ReadableStreamDefaultController<Uint8Array>,
@@ -481,6 +762,10 @@ export class IbbManager {
       idleTimer: undefined,
       pullWaiters: [],
       cancelled: false,
+      idleTimeoutMs: options.idleTimeoutMs,
+      ...(options.onPeerClose ? { onPeerClose: options.onPeerClose } : {}),
+      ...(options.onCancel ? { onCancel: options.onCancel } : {}),
+      ...(options.onFail ? { onFail: options.onFail } : {}),
     };
 
     const readable = new ReadableStream<Uint8Array>(
@@ -496,11 +781,14 @@ export class IbbManager {
           this.#armIdleTimer(key, state);
           for (const waiter of state.pullWaiters.splice(0)) waiter();
         },
-        cancel: () => {
+        cancel: (reason: unknown) => {
+          if (state.onCancel) {
+            state.onCancel(reason);
+            return;
+          }
           state.cancelled = true;
           this.#finishInStream(key, state);
           // Tell the peer we're done (XEP-0047 allows either party to close).
-          const ourJid = source.ctx.to?.toString();
           const close = xml("close", { xmlns: NS_IBB, sid });
           this.#request(from, ourJid, close).catch(() => {
             // Peer may have closed already; best-effort only.
@@ -508,13 +796,198 @@ export class IbbManager {
         },
       },
       new ByteLengthQueuingStrategy({
-        highWaterMark: this.#receiveBufferBytes(source.blockSize),
+        highWaterMark: this.#receiveBufferBytes(blockSize),
       }),
     );
 
     this.#armIdleTimer(key, state);
     this.#inStreams.set(key, state);
-    return { sid, from, blockSize: source.blockSize, readable };
+    return { sid, from, blockSize, readable };
+  }
+
+  /**
+   * Both halves of a duplex over one sid. The inbound half is an ordinary
+   * inbound stream with two hooks; the outbound half is the ordinary windowed
+   * sender with one. What ties them together is the teardown, which has to
+   * end both halves on every path — close, abort, the peer's <close/>, a
+   * cancelled reader, a failed block — and has to survive the two sides
+   * closing at the same moment.
+   *
+   * Crossing closes are why a closing duplex leaves a *tombstone*: its
+   * inbound state stays registered, finished and marked cancelled, until our
+   * own <close/> is answered. Without it the peer's <close/>, sent before it
+   * saw ours, finds nothing and is answered item-not-found — and since the
+   * peer did the same to ours, both close() calls would fail on a tunnel
+   * that both sides closed cleanly. While the tombstone stands, the peer's
+   * crossing <close/> is answered with a result, and its crossing <data/> is
+   * acked and discarded rather than refused.
+   */
+  #createDuplex(
+    key: string,
+    init: {
+      peer: string;
+      from: string | undefined;
+      sid: string;
+      blockSize: number;
+      window: number | undefined;
+      idleTimeoutMs: IbbIdleTimeout | undefined;
+    },
+  ): { handle: IbbDuplex; discard: (reason: Error) => void } {
+    // Filled in once the inbound half exists; the closures below run later.
+    const inbound: { state: InStreamState | undefined } = { state: undefined };
+
+    /**
+     * Retires the inbound half: ends the reader (cleanly, or with `error`)
+     * and — if `keepTombstone` — leaves the entry registered for a crossing
+     * <close/>. Idempotent; a half already finished is left as it is.
+     */
+    const retireInbound = (error: Error | undefined, keepTombstone: boolean) => {
+      const state = inbound.state;
+      if (!state || state.finished) return;
+      state.cancelled = true; // crossing <data/> is acked and discarded
+      try {
+        if (error) state.controller.error(error);
+        else state.controller.close();
+      } catch {
+        // Already closed or errored by the reader.
+      }
+      state.finished = true;
+      if (state.idleTimer !== undefined) clearTimeout(state.idleTimer);
+      for (const waiter of state.pullWaiters.splice(0)) waiter();
+      if (!keepTombstone) this.#dropInStream(key, state);
+    };
+
+    const removeTombstone = () => {
+      if (inbound.state) this.#dropInStream(key, inbound.state);
+    };
+
+    /**
+     * Whether the peer knows the stream is over: our <close/> went out, or
+     * theirs came in. A plain sender that fails stays silent — the peer's
+     * watchdog reaps its half — but a tunnel's peer usually has no watchdog,
+     * so a duplex that fails without saying so leaves it open for the
+     * session. Every teardown path ends in tellPeer().
+     */
+    let peerKnows = false;
+    const tellPeer = async () => {
+      if (peerKnows) return;
+      peerKnows = true;
+      try {
+        await this.#request(
+          init.peer,
+          init.from,
+          xml("close", { xmlns: NS_IBB, sid: init.sid }),
+        );
+      } catch {
+        // Best effort: the peer may be why we are failing.
+      }
+    };
+
+    const out = this.#createOutStream(
+      init.peer,
+      init.from,
+      init.sid,
+      init.blockSize,
+      init.window,
+      {
+        // Our <close/> is about to leave: from here on the peer may be
+        // closing too, so stop delivering but keep answering.
+        beforeSendClose: (reason) => {
+          peerKnows = true;
+          retireInbound(reason, true);
+        },
+        flushEachWrite: true,
+        // A refused block kills the tunnel now, not whenever someone next
+        // writes: with the watchdog off, nothing else would.
+        onFail: (error) => void abort(error),
+        // Acks are liveness too. A numeric idle timeout on a duplex measures
+        // silence in *both* directions; an upload with nothing coming back is
+        // not idle. Left alone while the reader is deliberately withholding
+        // acks — re-arming then would cut the stretched deadline short.
+        onActivity: () => {
+          const state = inbound.state;
+          if (state && !state.finished && state.pullWaiters.length === 0) {
+            this.#armIdleTimer(key, state);
+          }
+        },
+      },
+    );
+
+    let closing: Promise<void> | undefined;
+    const abort = async (reason: Error): Promise<void> => {
+      try {
+        await out.stream.abort(reason);
+        // out.abort() is a no-op on a stream that already failed or closed,
+        // and then neither its hook nor its <close/> ran.
+        retireInbound(reason, true);
+        await tellPeer();
+      } finally {
+        // With the watchdog off nothing else would ever remove it.
+        retireInbound(reason, false);
+        removeTombstone();
+      }
+    };
+
+    const reader = this.#createInStream(
+      key,
+      {
+        from: init.peer,
+        ourJid: init.from,
+        sid: init.sid,
+        blockSize: init.blockSize,
+      },
+      {
+        idleTimeoutMs: init.idleTimeoutMs ?? false,
+        onPeerClose: () => {
+          peerKnows = true;
+          out.peerClosed();
+        },
+        onFail: (error) => void abort(error),
+        onCancel: (reason) => {
+          void abort(
+            reason instanceof Error
+              ? reason
+              : new HttpxError("aborted", "duplex reader cancelled"),
+          );
+        },
+      },
+    );
+    inbound.state = this.#inStreams.get(key);
+
+    const handle: IbbDuplex = {
+      sid: init.sid,
+      peer: init.peer,
+      blockSize: init.blockSize,
+      readable: reader.readable,
+      write: (bytes) => out.stream.write(bytes),
+      // Idempotent: a second close() joins the first. Otherwise the sender's
+      // "already closed" refusal reaches the catch below as if a block had
+      // failed, and tears the tunnel down under the first close() mid-flush.
+      close: () =>
+        (closing ??= (async () => {
+          try {
+            await out.stream.close();
+          } catch (err) {
+            // A block failed, so close() never reached its <close/>.
+            retireInbound(err instanceof Error ? err : new Error(String(err)), true);
+            await tellPeer();
+            throw err;
+          } finally {
+            removeTombstone();
+          }
+        })()),
+      abort,
+    };
+
+    return {
+      handle,
+      // The <open> was refused: the peer holds nothing to be told about.
+      discard: (reason) => {
+        peerKnows = true;
+        retireInbound(reason, false);
+        removeTombstone();
+      },
+    };
   }
 
   async #onData(ctx: IqContext): Promise<Element | boolean> {
@@ -569,7 +1042,7 @@ export class IbbManager {
       // stretched across the window rather than stopped: a consumer working
       // through a full window still has room, and a stream whose consumer
       // walked away is still reaped instead of living for the session.
-      this.#armIdleTimer(key, state, this.#stalledTimeoutMs());
+      this.#armIdleTimer(key, state, true);
       await new Promise<void>((resolve) => state.pullWaiters.push(resolve));
     }
     // Resume measuring only once nobody is parked any more.
@@ -593,14 +1066,21 @@ export class IbbManager {
     const state = this.#inStreams.get(key);
     if (!state) return iqError("cancel", "item-not-found");
 
-    if (!state.finished) {
-      try {
-        state.controller.close();
-      } catch {
-        // Already errored.
-      }
+    if (state.finished) {
+      // A duplex tombstone: we are closing too and the two <close/>s
+      // crossed. The stream is closed either way — say so, and let our own
+      // close() know the peer's came first. The tombstone's owner removes it.
+      state.onPeerClose?.();
+      return true;
+    }
+    try {
+      state.controller.close();
+    } catch {
+      // Already errored.
     }
     this.#finishInStream(key, state);
+    // No half-close: on a duplex the peer's <close/> ends our direction too.
+    state.onPeerClose?.();
     return true;
   }
 
@@ -681,28 +1161,37 @@ export class IbbManager {
    * timeout per block of the window is the honest budget: it is how long a
    * consumer working steadily through a full window is allowed to take.
    */
-  #stalledTimeoutMs(): number {
-    return this.idleTimeoutMs * (clampWindow(this.receiveWindowBlocks) + 1);
+  #stalledTimeoutMs(idleTimeoutMs: number): number {
+    return idleTimeoutMs * (clampWindow(this.receiveWindowBlocks) + 1);
   }
 
-  #armIdleTimer(key: string, state: InStreamState, timeoutMs?: number): void {
+  #armIdleTimer(key: string, state: InStreamState, stalled = false): void {
     // pull() can fire after the stream is done (a consumer draining what is
     // already queued); re-arming then would resurrect a dead stream's timer.
     if (state.finished) return;
     if (state.idleTimer !== undefined) clearTimeout(state.idleTimer);
+    state.idleTimer = undefined;
+    // A tunnel's watchdog is off — both deadlines, the stalled one included.
+    const idle = state.idleTimeoutMs ?? this.idleTimeoutMs;
+    if (idle === false) return;
     state.idleTimer = setTimeout(() => {
       this.#finishInStream(
         key,
         state,
         new HttpxError("timeout", "IBB stream idle timeout"),
       );
-    }, timeoutMs ?? this.idleTimeoutMs);
+    }, stalled ? this.#stalledTimeoutMs(idle) : idle);
     (state.idleTimer as { unref?: () => void }).unref?.();
+  }
+
+  /** Unregisters `state` — only if it is still the entry under `key`. */
+  #dropInStream(key: string, state: InStreamState): void {
+    if (this.#inStreams.get(key) === state) this.#inStreams.delete(key);
   }
 
   #finishInStream(key: string, state: InStreamState, error?: Error): void {
     if (state.finished) {
-      this.#inStreams.delete(key);
+      this.#dropInStream(key, state);
       return;
     }
     state.finished = true;
@@ -715,6 +1204,15 @@ export class IbbManager {
         // Stream already closed.
       }
     }
-    this.#inStreams.delete(key);
+    this.#dropInStream(key, state);
+    // Deferred to a macrotask: the handler that found the error (a seq gap in
+    // #onData) has yet to return its IQ error. Tearing down now would put our
+    // <close/> on the wire first, and the sender — seeing the stream closed
+    // before the refusal — would take its refused block for an ordinary
+    // post-close discard.
+    if (error && state.onFail) {
+      const onFail = state.onFail;
+      setTimeout(() => onFail(error), 0);
+    }
   }
 }

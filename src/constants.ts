@@ -1,5 +1,12 @@
 /** XEP-0332: HTTP over XMPP Transport. */
 export const NS_HTTPX = "urn:xmpp:http";
+/**
+ * "This entity accepts absolute-form request targets" (`https://host/path` in
+ * `<req resource=…>`). XEP-0332 v0.5.1 defines `resource` as a path beginning
+ * with "/", so a requester cannot assume a peer takes anything else; this is
+ * how it finds out. Provisional, pending the XSF (n146 design §4.3).
+ */
+export const NS_HTTPX_ABSOLUTE_FORM = "urn:xmpp:http#absolute-form";
 /** XEP-0131: Stanza Headers and Internet Metadata (SHIM). */
 export const NS_SHIM = "http://jabber.org/protocol/shim";
 /** XEP-0047: In-Band Bytestreams. */

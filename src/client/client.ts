@@ -12,7 +12,7 @@ import {
 } from "../constants.js";
 import { DiscoCache } from "../discovery.js";
 import { CodecError, fromXmppError, HttpxError } from "../errors.js";
-import { IbbManager } from "../ibb/ibb.js";
+import { IbbManager, type IbbDuplex } from "../ibb/ibb.js";
 import { generateId, type XmppSession } from "../session.js";
 import type { Socks5Adapter } from "../socks5/protocol.js";
 import {
@@ -29,6 +29,7 @@ import {
   type StreamMechanism,
 } from "../transport/select.js";
 import type { HttpxBodyInit, HttpxRequestInit } from "../types.js";
+import { resourceForm } from "../urls.js";
 import {
   deferredStream,
   iterateStream,
@@ -86,6 +87,30 @@ export interface HttpxClientOptions {
    * IBB (Node-only — see xmpp-httpx/node's createSocks5Adapter).
    */
   socks5?: Socks5Adapter;
+}
+
+export interface HttpxConnectInit {
+  /** The tunnel's target in authority-form: "example.org:443". */
+  authority: string;
+  headers?: HeadersInit;
+  /**
+   * Bounds the CONNECT <req> IQ; defaults to the client's IQ timeout. The
+   * wait for the exit's <open> that follows a 2xx is bounded separately, by
+   * the client's idleTimeoutMs.
+   */
+  timeoutMs?: number;
+  /** Aborts establishment. Once connect() resolves the tunnel is yours. */
+  signal?: AbortSignal;
+}
+
+export interface HttpxConnectResult {
+  /**
+   * The exit's answer. For a tunnel it is a 2xx with no body; anything else
+   * (403, 502, 504…) is an ordinary response and may carry an explanation.
+   */
+  response: HttpxResponse;
+  /** Both directions of the tunnel on a 2xx, otherwise null. */
+  tunnel: IbbDuplex | null;
 }
 
 interface NormalizedBody {
@@ -186,6 +211,14 @@ export class HttpxClient {
     }
     const signal = init.signal;
     signal?.throwIfAborted();
+    if (init.method === "CONNECT") {
+      // A CONNECT answer is a stream in both directions; request() could only
+      // ever expose the half that reads.
+      throw new HttpxError(
+        "protocol-error",
+        "CONNECT opens a tunnel; use HttpxClient.connect()",
+      );
+    }
 
     const from = this.#options.from;
     if (this.#options.discover !== false) {
@@ -354,6 +387,117 @@ export class HttpxClient {
     });
   }
 
+  /**
+   * Asks `to` for a CONNECT tunnel to `init.authority` (design §4.2). On a
+   * 2xx the exit opens one IBB stream and both directions travel on it; the
+   * returned tunnel is that stream, with its idle watchdog off — a tunnel is
+   * idle by nature, and its liveness is the XMPP session's and the TCP
+   * side's business.
+   */
+  async connect(to: string, init: HttpxConnectInit): Promise<HttpxConnectResult> {
+    if (this.#closed) {
+      throw new HttpxError("aborted", "client is closed");
+    }
+    const signal = init.signal;
+    signal?.throwIfAborted();
+    if (resourceForm(init.authority) !== "authority") {
+      throw new CodecError(
+        `CONNECT needs an authority-form target (host:port), got "${init.authority}"`,
+      );
+    }
+
+    const from = this.#options.from;
+    if (this.#options.discover !== false) {
+      const support = await withAbort(this.#disco.supportsHttpx(to, from), signal);
+      if (support === "no") {
+        throw new HttpxError(
+          "not-implemented",
+          `${to} does not advertise ${NS_HTTPX}`,
+        );
+      }
+    }
+
+    const req: ReqStanza = {
+      method: "CONNECT",
+      resource: init.authority,
+      version: HTTP_VERSION,
+      // A tunnel is one IBB stream: say so, rather than let the exit pick a
+      // mechanism that cannot carry the other direction.
+      accept: { sipub: false, ibb: true, jingle: false },
+      headers: new Headers(init.headers),
+      ...(this.#options.maxChunkSize !== undefined
+        ? { maxChunkSize: this.#options.maxChunkSize }
+        : {}),
+    };
+    const iqAttrs: Record<string, string> =
+      from !== undefined ? { type: "set", to, from } : { type: "set", to };
+    const timeoutMs =
+      init.timeoutMs ?? this.#options.defaultTimeoutMs ?? DEFAULT_IQ_TIMEOUT_MS;
+
+    let result: Element;
+    try {
+      result = await withAbort(
+        this.#session.iqCaller.request(xml("iq", iqAttrs, encodeReq(req)), timeoutMs),
+        signal,
+      );
+    } catch (err) {
+      throw fromXmppError(err);
+    }
+
+    const respEl = result.getChild("resp", NS_HTTPX);
+    if (!respEl) {
+      throw new CodecError("IQ result without a <resp> element");
+    }
+    const resp = decodeResp(respEl);
+    const peer = result.attrs["from"] ?? to;
+    const response = (body: ReadableStream<Uint8Array> | null) =>
+      new HttpxResponse({
+        statusCode: resp.statusCode,
+        ...(resp.statusMessage !== undefined
+          ? { statusMessage: resp.statusMessage }
+          : {}),
+        version: resp.version,
+        headers: resp.headers,
+        body,
+      });
+
+    if (resp.statusCode < 200 || resp.statusCode > 299) {
+      return {
+        response: response(this.#openResponseBody(peer, resp.data, signal)),
+        tunnel: null,
+      };
+    }
+
+    if (resp.data?.kind !== "ibb") {
+      // A 2xx is the exit saying the tunnel exists. Without a stream to carry
+      // it there is nothing to hand back, and pretending otherwise would give
+      // the caller a pipe that silently goes nowhere.
+      throw new HttpxError(
+        "protocol-error",
+        "CONNECT answered 2xx without an IBB stream",
+      );
+    }
+
+    const pending = this.#ibb.expectDuplex(peer, resp.data.sid, {
+      timeoutMs: this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+      ...(this.#options.ibbWindow !== undefined
+        ? { window: this.#options.ibbWindow }
+        : {}),
+      ...(from !== undefined ? { from } : {}),
+    });
+    let tunnel: IbbDuplex;
+    try {
+      tunnel = await withAbort(pending, signal);
+    } catch (err) {
+      // Abandoned while the <open> was on its way: a tunnel with its
+      // watchdog off would otherwise live, unowned, for the session.
+      const reason = err instanceof Error ? err : new Error(String(err));
+      pending.then((late) => late.abort(reason)).catch(() => {});
+      throw fromXmppError(err);
+    }
+    return { response: response(null), tunnel };
+  }
+
   async #sendRequestBody(
     to: string,
     from: string | undefined,
@@ -431,9 +575,14 @@ export class HttpxClient {
 
     if (data.kind === "ibb") {
       const sid = data.sid;
+      // The stream's own watchdog follows the configured timeout — per stream
+      // now; it used to be the manager's whatever the client was told. Left
+      // unset, it is still the manager's.
+      const explicitIdle = idleTimeoutMs ?? this.#options.idleTimeoutMs;
       const body = deferredStream(async () => {
         const incoming = await this.#ibb.expectIncoming(peer, sid, {
           timeoutMs: idle,
+          ...(explicitIdle !== undefined ? { idleTimeoutMs: explicitIdle } : {}),
         });
         return incoming.readable;
       });

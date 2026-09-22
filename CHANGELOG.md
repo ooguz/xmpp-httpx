@@ -36,6 +36,37 @@
   before. Authority-form is checked strictly — no userinfo, no path, no
   query, a port in 1–65535 — so `evil.org:80/../admin` is rejected rather
   than reinterpreted.
+- **Duplex IBB streams, and `CONNECT` tunnels on top of them.**
+  `IbbManager.openDuplex()` / `expectDuplex()` give one IBB session used in
+  both directions — the opener's sid, a `seq` counter per direction, the
+  acceptor adopting the sid without an `<open>` of its own (n146 design §4.2).
+  There is no half-close: `close()`, `abort()`, the peer's `<close/>` and a
+  cancelled reader all end both directions, and two `<close/>`s that cross on
+  the wire both succeed (the closing side keeps a tombstone that answers the
+  peer's until its own is acked). Every failure path tells the peer, because
+  a tunnel's peer has no watchdog to reap it. A duplex sends what each
+  `write()` leaves over at once instead of holding a sub-block tail for the
+  next write — a TLS ClientHello would otherwise never leave — while bytes
+  written against a full window still coalesce into full blocks.
+  `HttpxClient.connect(to, { authority })` asks for a tunnel and returns the
+  `<resp>` plus the duplex; a handler answers `CONNECT` with
+  `{ status: 200, tunnel: (t) => … }`, and the server opens the stream after
+  the reply. The library dials nothing. A tunnel that fails to open is still
+  handed to the handler, already dead, so its error path closes the
+  destination socket. `request({ method: "CONNECT" })` now refuses and points
+  at `connect()`.
+- **Idle watchdogs are per stream.** `expectIncoming()` takes
+  `idleTimeoutMs`, and a duplex defaults to `false`: no inbound idle timer and
+  no stretched ack-withholding deadline, since a tunnel is idle by nature. The
+  sender's per-block ack deadline stays on for tunnels — it only runs while
+  bytes are outstanding. Bodies are unchanged by default; the one visible
+  difference is that `HttpxClient`/`HttpxServer`'s `idleTimeoutMs` option,
+  and the per-request one, now also reach an IBB body's own watchdog, where
+  before they only bounded the wait for its `<open>`.
+- **`urn:xmpp:http#absolute-form` is advertised** (design §4.3), so a
+  requester can find out that `resource='https://host/path'` is accepted, and
+  `DiscoCache.supports(jid, feature)` answers that and any other feature
+  question from the same one disco query.
 - **The origin proxy refuses a target naming another origin.**
   `createOriginProxyHandler` resolved the requester's `resource` against the
   configured origin with `new URL(ref, base)`, which drops the base entirely

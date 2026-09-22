@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HttpxClient } from "../../src/client/client.js";
 import { allowAll } from "../../src/server/policy.js";
 import { HttpxServer } from "../../src/server/server.js";
-import { bytesFromStream } from "../../src/util/bytes.js";
+import { bytesFromStream, concatBytes } from "../../src/util/bytes.js";
 import { connectUser, type E2eClient } from "./e2e-env.js";
 
 function patternBytes(length: number): Uint8Array {
@@ -10,6 +10,10 @@ function patternBytes(length: number): Uint8Array {
   for (let i = 0; i < length; i++) bytes[i] = (i * 31 + 7) & 0xff;
   return bytes;
 }
+
+const TUNNEL_UP = 250_000;
+const TUNNEL_DOWN = 300_000;
+let exitReceived: Uint8Array | undefined;
 
 describe("c2s round-trips over a real Prosody", () => {
   let alice: E2eClient;
@@ -27,6 +31,30 @@ describe("c2s round-trips over a real Prosody", () => {
       onError: (err) => console.error("[e2e] server error:", err),
     });
     server.handle(async (req) => {
+      if (req.method === "CONNECT") {
+        // A stand-in destination: sends TUNNEL_DOWN while it reads
+        // TUNNEL_UP, concurrently, then waits for the client to close.
+        return {
+          status: 200,
+          tunnel: async (tunnel) => {
+            const reader = tunnel.readable.getReader();
+            const sending = (async () => {
+              const down = patternBytes(TUNNEL_DOWN);
+              for (let o = 0; o < down.length; o += 10_000) {
+                await tunnel.write(down.subarray(o, o + 10_000));
+              }
+            })();
+            const parts: Uint8Array[] = [];
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              parts.push(value);
+            }
+            await sending.catch(() => {});
+            exitReceived = concatBytes(parts);
+          },
+        };
+      }
       if (req.resource === "/hello") {
         return {
           status: 200,
@@ -95,6 +123,40 @@ describe("c2s round-trips over a real Prosody", () => {
       }),
     });
     expect(await resp.text()).toBe("120000");
+  });
+
+  it("a CONNECT tunnel carries bytes both ways at once over one IBB sid", async () => {
+    const { response, tunnel } = await client.connect(bob.jid, {
+      authority: "example.org:443",
+    });
+    expect(response.statusCode).toBe(200);
+    const reader = tunnel!.readable.getReader();
+    const up = patternBytes(TUNNEL_UP).map((b) => b ^ 0x5a);
+    const [, down] = await Promise.all([
+      (async () => {
+        for (let o = 0; o < up.length; o += 7_000) {
+          await tunnel!.write(up.subarray(o, o + 7_000));
+        }
+      })(),
+      (async () => {
+        const parts: Uint8Array[] = [];
+        let n = 0;
+        while (n < TUNNEL_DOWN) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+          n += value.length;
+        }
+        return concatBytes(parts);
+      })(),
+    ]);
+    expect(down).toEqual(patternBytes(TUNNEL_DOWN));
+    await tunnel!.close();
+    // The exit's reader ends on our <close/>, having seen every byte.
+    for (let i = 0; i < 100 && exitReceived === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(exitReceived).toEqual(up);
   });
 
   it("HTTP 404 passes through as a response", async () => {

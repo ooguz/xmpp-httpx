@@ -14,7 +14,7 @@ import {
 } from "../constants.js";
 import { advertiseHttpx } from "../discovery.js";
 import { HttpxError } from "../errors.js";
-import { IbbManager } from "../ibb/ibb.js";
+import { IbbManager, type IbbDuplex } from "../ibb/ibb.js";
 import type { IqContext, XmppSession } from "../session.js";
 import { generateId } from "../session.js";
 import type { Socks5Adapter } from "../socks5/protocol.js";
@@ -27,6 +27,7 @@ import { createDefaultRegistry } from "../transport/default-registry.js";
 import { inlineToBytes, isInline } from "../transport/inline.js";
 import type { TransportRegistry } from "../transport/registry.js";
 import {
+  resolveChunkSize,
   selectEncoding,
   type BodySource,
   type StreamAcceptFlags,
@@ -79,7 +80,28 @@ export interface HttpxHandlerResponse {
   statusMessage?: string;
   headers?: HeadersInit;
   body?: HttpxBodyInit;
+  /**
+   * CONNECT only: turns a 2xx answer into a tunnel (design §4.2). The
+   * response carries no body; instead one IBB stream, opened by this server
+   * after the reply, carries bytes both ways, and this callback receives it.
+   * The library does not dial anything — the handler connects to the
+   * destination first (so it can answer 502/504 instead), then returns 2xx
+   * with this callback and pipes the two together.
+   *
+   * It is called exactly once for a 2xx response, and never for any other
+   * status. If the stream cannot be opened (the requester has gone, or
+   * refuses the <open>), it is still called, with a tunnel that is already
+   * dead: `readable` errors and write() rejects — so the handler's ordinary
+   * error path is also where it closes the destination socket.
+   */
+  tunnel?: (tunnel: HttpxTunnel) => void | Promise<void>;
 }
+
+/**
+ * Both directions of a CONNECT tunnel over one IBB session; see IbbDuplex.
+ * No half-close: close() or abort() from either side ends both directions.
+ */
+export type HttpxTunnel = IbbDuplex;
 
 /**
  * Returning a WHATWG Response is supported directly, which makes
@@ -246,6 +268,10 @@ export class HttpxServer {
       return iqError("cancel", "forbidden");
     }
 
+    if (req.method === "CONNECT") {
+      return this.#onConnect(req, from, to);
+    }
+
     // Materialize the request body (may be a not-yet-started stream).
     let body: ReadableStream<Uint8Array> | null;
     try {
@@ -314,8 +340,14 @@ export class HttpxServer {
           source: { kind: "empty" },
         };
       } else {
+        const result = await handler(request);
+        if (!(result instanceof Response) && result.tunnel !== undefined) {
+          throw new TypeError(
+            `a tunnel answers CONNECT only, not ${req.method}`,
+          );
+        }
         normalized = await this.#maybeCompress(
-          await this.#normalizeResult(await handler(request)),
+          await this.#normalizeResult(result),
           req.headers,
         );
       }
@@ -339,6 +371,180 @@ export class HttpxServer {
       ourJid: to,
       accept: request.accept,
     });
+  }
+
+  /**
+   * CONNECT (design §4.2): the handler decides the status; a 2xx with a
+   * `tunnel` callback becomes a <resp> naming one IBB sid, which this server
+   * then opens and hands over as a duplex. Everything else is answered like
+   * any other response.
+   */
+  async #onConnect(
+    req: ReturnType<typeof decodeReq>,
+    from: string,
+    to: string,
+  ): Promise<Element> {
+    const plain = (status: number): Element =>
+      this.#respond({
+        status,
+        statusMessage: DEFAULT_STATUS_MESSAGES[status] ?? String(status),
+        headers: new Headers(),
+        source: { kind: "empty" },
+      });
+
+    // RFC 9110 §9.3.6: a CONNECT request has no content. What would follow
+    // the <req> is the tunnel, and that is the answer's to name.
+    if (req.data !== undefined) return plain(400);
+    // A tunnel is one IBB stream; a requester that refuses IBB cannot have
+    // one, so do not make the handler dial a destination for nothing.
+    if (!req.accept.ibb) return plain(501);
+
+    const handler = this.#handler;
+    if (!handler) return plain(501);
+
+    const request: HttpxServerRequest = {
+      from,
+      to,
+      method: req.method,
+      resource: req.resource,
+      url: resourceToUrl(to, req.resource),
+      headers: req.headers,
+      body: null,
+      accept: {
+        ibb: true,
+        chunked: true,
+        sipub: req.accept.sipub,
+        jingle: req.accept.jingle,
+        ...(req.maxChunkSize !== undefined ? { maxChunkSize: req.maxChunkSize } : {}),
+      },
+    };
+
+    let result: Response | HttpxHandlerResponse;
+    try {
+      result = await handler(request);
+    } catch (err) {
+      this.#options.onError?.(err, { from, resource: req.resource });
+      return plain(500);
+    }
+
+    const tunnel = result instanceof Response ? undefined : result.tunnel;
+    const status = result instanceof Response ? result.status : (result.status ?? 200);
+    const success = status >= 200 && status <= 299;
+    if (success && tunnel === undefined) {
+      // A 2xx to CONNECT *is* the tunnel (RFC 9110 §9.3.6). Without one, a
+      // body streamed over IBB would reach connect() looking exactly like a
+      // tunnel that only ever talks one way.
+      this.#options.onError?.(
+        new TypeError("a 2xx answer to CONNECT needs a tunnel callback"),
+        { from, resource: req.resource },
+      );
+      return plain(500);
+    }
+    if (tunnel === undefined || !success) {
+      // Not a tunnel: an ordinary answer (typically 403/502/504, no body).
+      let normalized: NormalizedResponse;
+      try {
+        normalized = await this.#normalizeResult(result);
+      } catch (err) {
+        this.#options.onError?.(err, { from, resource: req.resource });
+        return plain(500);
+      }
+      return this.#respond(normalized, { peer: from, ourJid: to, accept: request.accept });
+    }
+
+    const handlerResult = result as HttpxHandlerResponse;
+    if (handlerResult.body !== undefined) {
+      this.#options.onError?.(
+        new TypeError("a tunnel response carries no body"),
+        { from, resource: req.resource },
+      );
+      return plain(500);
+    }
+
+    const sid = generateId("ibb");
+    const blockSize = this.#ibbBlockSize(req.maxChunkSize);
+    let headers: Headers;
+    try {
+      headers = new Headers(handlerResult.headers);
+    } catch (err) {
+      // The handler has dialled its destination and is waiting to be handed
+      // the tunnel; "called exactly once for a 2xx" covers this too — dead,
+      // so its error path hangs up.
+      this.#options.onError?.(err, { from, resource: req.resource });
+      setTimeout(() => {
+        void Promise.resolve()
+          .then(() => tunnel(deadTunnel(sid, from, blockSize, err)))
+          .catch((e: unknown) => this.#options.onError?.(e, { from, resource: req.resource }));
+      }, 0);
+      return plain(500);
+    }
+    const resp: RespStanza = {
+      version: HTTP_VERSION,
+      statusCode: status,
+      statusMessage:
+        handlerResult.statusMessage ??
+        (status === 200 ? "Connection Established" : DEFAULT_STATUS_MESSAGES[status] ?? String(status)),
+      headers,
+      data: { kind: "ibb", sid },
+    };
+    this.#scheduleTunnel(from, to, sid, blockSize, tunnel, req.resource);
+    return encodeResp(resp);
+  }
+
+  /**
+   * The block size of an IBB stream this server opens: the requester's
+   * maxChunkSize (its stanza limit is what carries the base64), lowered — never
+   * raised — by ibbBlockSize, and never below the XEP's floor.
+   */
+  #ibbBlockSize(requested: number | undefined): number {
+    const wanted = resolveChunkSize(requested);
+    return Math.max(
+      MIN_CHUNK_SIZE,
+      Math.min(wanted, this.#options.ibbBlockSize ?? wanted),
+    );
+  }
+
+  /**
+   * Opens the tunnel's stream after the IQ reply has gone (the same macrotask
+   * ordering the body senders rely on) and hands it to the handler.
+   */
+  #scheduleTunnel(
+    peer: string,
+    ourJid: string,
+    sid: string,
+    blockSize: number,
+    callback: (tunnel: HttpxTunnel) => void | Promise<void>,
+    resource: string,
+  ): void {
+    setTimeout(() => {
+      // Read now, not when scheduled: a stop() in between released the
+      // manager, and a tunnel opened on it — watchdog off — would outlive the
+      // server for the rest of the session.
+      const ibb = this.#started ? this.#ibb : undefined;
+      void (async () => {
+        let tunnel: HttpxTunnel;
+        try {
+          if (!ibb) throw new HttpxError("aborted", "server stopped");
+          tunnel = await ibb.openDuplex(peer, {
+            sid,
+            blockSize,
+            ...(this.#options.ibbWindow !== undefined
+              ? { window: this.#options.ibbWindow }
+              : {}),
+            ...(ourJid !== "" ? { from: ourJid } : {}),
+          });
+        } catch (err) {
+          this.#options.onError?.(err, { from: peer, resource });
+          tunnel = deadTunnel(sid, peer, blockSize, err);
+        }
+        try {
+          await callback(tunnel);
+        } catch (err) {
+          this.#options.onError?.(err, { from: peer, resource });
+          await tunnel.abort(err instanceof Error ? err : new Error(String(err)));
+        }
+      })();
+    }, 0);
   }
 
   /** Buffers small streamed bodies so they can still be inlined. */
@@ -505,9 +711,15 @@ export class HttpxServer {
       const sid = data.sid;
       const ibb = this.#ibb!;
       const timeoutMs = this.#options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      // The stream's own watchdog follows the option too — per stream now,
+      // where it used to be the manager's regardless of what was configured.
+      const idleTimeoutMs = this.#options.idleTimeoutMs;
       return limitStream(
         deferredStream(async () => {
-          const incoming = await ibb.expectIncoming(from, sid, { timeoutMs });
+          const incoming = await ibb.expectIncoming(from, sid, {
+            timeoutMs,
+            ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
+          });
           return incoming.readable;
         }),
         maxBytes,
@@ -710,6 +922,32 @@ export class HttpxServer {
       });
     }, 0);
   }
+}
+
+/**
+ * The tunnel handed to a handler whose stream never opened: already failed,
+ * so the handler's usual error path — the same one a tunnel dying mid-way
+ * takes — is where it cleans up.
+ */
+function deadTunnel(
+  sid: string,
+  peer: string,
+  blockSize: number,
+  cause: unknown,
+): HttpxTunnel {
+  const error =
+    cause instanceof Error ? cause : new HttpxError("stream-error", String(cause));
+  return {
+    sid,
+    peer,
+    blockSize,
+    readable: new ReadableStream<Uint8Array>({
+      start: (controller) => controller.error(error),
+    }),
+    write: () => Promise.reject(error),
+    close: () => Promise.reject(error),
+    abort: () => Promise.resolve(),
+  };
 }
 
 function contentLengthOf(normalized: NormalizedResponse): number | undefined {

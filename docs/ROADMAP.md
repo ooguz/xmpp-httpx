@@ -395,16 +395,27 @@ on the other end.
   authority-form (`example.org:443`, `CONNECT` only, per RFC 9112 §3.2.3) and
   absolute-form (`https://example.org/x`). Origin-form decodes exactly as
   before.
-- [ ] **Bidirectional stream body** (M): a duplex handle over one IBB or S5B
-  session. Bodies are one-directional today, and a tunnel is not.
+- [x] **Bidirectional stream body** (M, 2026-09-22): `IbbManager.openDuplex()`
+  / `expectDuplex()` — one IBB session, the opener's sid in both directions,
+  a `seq` counter per direction, the acceptor adopting the sid without an
+  `<open>`. No half-close (either `<close/>` ends both ways, crossing closes
+  both succeed via a tombstone); writes flush their sub-block tail at once,
+  since a tunnel is interactive. On top of it `HttpxClient.connect()` and a
+  handler's `{ status: 200, tunnel }`; the library dials nothing. IBB only —
+  an S5B duplex waits for the `fast` profile. The `<connect>` companion wire
+  form (design §4.2 caveat) is not implemented.
 - [ ] **Fair scheduling** (M): many concurrent streams share one XMPP
   connection; the sender should round-robin blocks across active streams so
   one large download cannot starve twenty small ones. A per-session scheduler
   in front of the IBB sender — the window makes this both possible and
   necessary, since a single stream can now hold several slots.
-- [ ] **Tunnel-aware watchdogs** (S): the idle timeout is right for a body and
-  wrong for a tunnel, which is idle by nature. Needs to be selectable per
-  stream rather than per manager.
+- [x] **Tunnel-aware watchdogs** (S, 2026-09-22): the idle timeout is per
+  stream; a duplex defaults to `false` (no idle timer, no stretched
+  ack-withholding deadline), bodies keep theirs. The sender's per-block ack
+  deadline stays on for tunnels — it is not an idle timer. Client/server
+  `idleTimeoutMs` now reach an IBB body's own watchdog too.
+- [x] **Absolute-form discovery** (S, 2026-09-22): `urn:xmpp:http#absolute-form`
+  advertised; `DiscoCache.supports(jid, feature)`.
 - [ ] **XEP-0198 resumption** (M): stream management with resumption keeps
   long-lived streams alive across a brief network loss. Also bounds the
   retained outbound queue, which a saturated windowed sender grows (see

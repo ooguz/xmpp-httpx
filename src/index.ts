@@ -73,7 +73,14 @@ export {
   type BodyTransport,
 } from "./transport/registry.js";
 export { createDefaultRegistry } from "./transport/default-registry.js";
-export { IbbManager, type IbbInStream, type IbbOutStream } from "./ibb/ibb.js";
+export {
+  IbbManager,
+  type DuplexOptions,
+  type IbbDuplex,
+  type IbbIdleTimeout,
+  type IbbInStream,
+  type IbbOutStream,
+} from "./ibb/ibb.js";
 export * from "./sipub/index.js";
 export * from "./jingle/index.js";
 export {

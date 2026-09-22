@@ -4,6 +4,7 @@ import {
   NS_CAPS,
   NS_DISCO_INFO,
   NS_HTTPX,
+  NS_HTTPX_ABSOLUTE_FORM,
   NS_IBB,
   NS_JINGLE,
   NS_JINGLE_FT,
@@ -27,6 +28,9 @@ export function httpxFeatures(extra: readonly string[] = []): string[] {
     NS_DISCO_INFO,
     NS_CAPS,
     NS_HTTPX,
+    // decodeReq() accepts absolute-form on every entity, so every entity may
+    // say so; what a *handler* does with the URL is the application's call.
+    NS_HTTPX_ABSOLUTE_FORM,
     NS_SHIM,
     NS_IBB,
     NS_SIPUB,
@@ -82,7 +86,9 @@ export function advertiseHttpx(
 export type DiscoSupport = "yes" | "no" | "unknown";
 
 /**
- * Per-JID cache of "does this peer advertise urn:xmpp:http?".
+ * Per-JID cache of a peer's disco#info features — "does it advertise
+ * urn:xmpp:http?", and any other feature a caller needs to check first
+ * (absolute-form, a tunnel extension).
  *
  * Two layers:
  * - Passive XEP-0115: presence stanzas carrying <c hash='sha-1' ver=…> map
@@ -98,11 +104,12 @@ export type DiscoSupport = "yes" | "no" | "unknown";
 export class DiscoCache {
   readonly #session: XmppSession;
   readonly #timeoutMs: number;
-  readonly #cache = new Map<string, DiscoSupport>();
+  /** JID → its feature list, or null when disco gave no answer. */
+  readonly #cache = new Map<string, ReadonlySet<string> | null>();
   /** bare JID → announced caps ver. */
   readonly #jidVer = new Map<string, string>();
-  /** verified ver → supports httpx. */
-  readonly #verSupport = new Map<string, boolean>();
+  /** verified ver → its feature list. */
+  readonly #verFeatures = new Map<string, ReadonlySet<string>>();
   readonly #onStanza = (stanza: Element) => this.#handlePresence(stanza);
   #disposed = false;
 
@@ -123,17 +130,28 @@ export class DiscoCache {
     this.#session.removeListener("stanza", this.#onStanza);
   }
 
-  async supportsHttpx(jid: string, from?: string): Promise<DiscoSupport> {
+  supportsHttpx(jid: string, from?: string): Promise<DiscoSupport> {
+    return this.supports(jid, NS_HTTPX, from);
+  }
+
+  /** Whether `jid` advertises `feature`; one disco query serves every feature. */
+  async supports(jid: string, feature: string, from?: string): Promise<DiscoSupport> {
+    const features = await this.#features(jid, from);
+    if (features === null) return "unknown";
+    return features.has(feature) ? "yes" : "no";
+  }
+
+  async #features(jid: string, from: string | undefined): Promise<ReadonlySet<string> | null> {
     const ver = this.#jidVer.get(bareJid(jid));
     if (ver !== undefined) {
-      const known = this.#verSupport.get(ver);
-      if (known !== undefined) return known ? "yes" : "no";
+      const known = this.#verFeatures.get(ver);
+      if (known !== undefined) return known;
     }
 
     const cached = this.#cache.get(jid);
     if (cached !== undefined) return cached;
 
-    let result: DiscoSupport = "unknown";
+    let result: ReadonlySet<string> | null = null;
     try {
       const attrs: Record<string, string> =
         from !== undefined
@@ -143,17 +161,20 @@ export class DiscoCache {
       const reply = await this.#session.iqCaller.request(iq, this.#timeoutMs);
       const query = reply.getChild("query", NS_DISCO_INFO);
       if (query) {
-        const supported = query
-          .getChildren("feature")
-          .some((f) => f.attrs["var"] === NS_HTTPX);
-        result = supported ? "yes" : "no";
+        const features = new Set(
+          query
+            .getChildren("feature")
+            .map((f) => f.attrs["var"])
+            .filter((v): v is string => v !== undefined),
+        );
+        result = features;
 
         // XEP-0115: a verified hash lets every JID with this ver share the
         // verdict without further queries.
         if (ver !== undefined) {
           try {
             if ((await capsVerFromDiscoQuery(query)) === ver) {
-              this.#verSupport.set(ver, supported);
+              this.#verFeatures.set(ver, features);
             }
           } catch {
             // Unverifiable response; fall back to per-JID caching.
@@ -161,7 +182,7 @@ export class DiscoCache {
         }
       }
     } catch {
-      result = "unknown";
+      result = null;
     }
 
     this.#cache.set(jid, result);
@@ -172,7 +193,7 @@ export class DiscoCache {
     if (jid === undefined) {
       this.#cache.clear();
       this.#jidVer.clear();
-      this.#verSupport.clear();
+      this.#verFeatures.clear();
     } else {
       this.#cache.delete(jid);
       this.#jidVer.delete(bareJid(jid));

@@ -4,6 +4,7 @@ export {
   type HttpxHandlerResponse,
   type HttpxServerOptions,
   type HttpxServerRequest,
+  type HttpxTunnel,
 } from "./server.js";
 export {
   allowAll,
