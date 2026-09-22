@@ -87,6 +87,26 @@ export const DEFAULT_IBB_WINDOW = 8;
  * peer can go unnoticed.
  */
 export const MAX_IBB_WINDOW = 256;
+/**
+ * IBB blocks in flight across *all* streams of one session. Each stream keeps
+ * its own window as well; this is what stops the streams from adding theirs
+ * up. Without it every stream holds `window` blocks at once, the stanzas pile
+ * up in the one XMPP connection's send queue, and a small page's first block
+ * waits behind every large download's full window. Twice the default stream
+ * window, so a stream alone runs exactly as fast as it did before.
+ */
+export const DEFAULT_IBB_SESSION_WINDOW = 16;
+/**
+ * A block unanswered for this long — or for IBB_PARK_FACTOR times the
+ * session's measured ack latency, whichever is longer — is taken to be
+ * parked at the receiver, which is withholding its ack on purpose, rather
+ * than queued on our side. It stops counting against the session budget:
+ * the budget bounds what waits in the connection's send queue, and a parked
+ * block is not waiting there. Its stream's own window still holds it.
+ * Nothing is parked before the session has timed its first ack.
+ */
+export const DEFAULT_IBB_PARK_FLOOR_MS = 250;
+export const IBB_PARK_FACTOR = 4;
 /** How long an unclaimed incoming IBB <open> is held before being refused. */
 export const DEFAULT_IBB_ACCEPT_TIMEOUT_MS = 5_000;
 /** Unclaimed sipub publications / jingle offers expire after this. */

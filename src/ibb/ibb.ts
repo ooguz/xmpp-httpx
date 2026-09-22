@@ -2,9 +2,12 @@ import xml, { Element } from "@xmpp/xml";
 import {
   DEFAULT_IBB_ACCEPT_TIMEOUT_MS,
   DEFAULT_IBB_BLOCK_SIZE,
+  DEFAULT_IBB_PARK_FLOOR_MS,
+  DEFAULT_IBB_SESSION_WINDOW,
   DEFAULT_IBB_WINDOW,
   DEFAULT_IDLE_TIMEOUT_MS,
   DEFAULT_MAX_BUFFERED_BYTES,
+  IBB_PARK_FACTOR,
   MAX_CHUNK_SIZE,
   MAX_IBB_WINDOW,
   NS_IBB,
@@ -183,10 +186,36 @@ function iqError(
  * would silently admit every block at once and remove backpressure entirely —
  * the one property this whole mechanism exists to keep.
  */
-function clampWindow(value: number | undefined): number {
-  const wanted = value ?? DEFAULT_IBB_WINDOW;
-  if (!Number.isFinite(wanted)) return DEFAULT_IBB_WINDOW;
+function clampWindow(
+  value: number | undefined,
+  fallback: number = DEFAULT_IBB_WINDOW,
+): number {
+  const wanted = value ?? fallback;
+  if (!Number.isFinite(wanted)) return fallback;
   return Math.max(1, Math.min(MAX_IBB_WINDOW, Math.floor(wanted)));
+}
+
+/**
+ * A sending stream as the session scheduler sees it. `granted` counts session
+ * slots reserved for it and not yet used: a grant is made when a slot frees,
+ * and consumed by the stream's pump when it next runs — so a slot is never
+ * handed to one stream and taken by another in between.
+ */
+/** A dispatched block's hold on the session budget. */
+interface SendSlot {
+  dispatchedAt: number;
+  /** Still counted against the budget: not yet settled, not yet parked. */
+  counted: boolean;
+}
+
+const now = (): number => globalThis.performance?.now() ?? Date.now();
+
+interface SendEntry {
+  granted: number;
+  /** Has a block to send, and room for it in its own window. */
+  wants(): boolean;
+  /** Re-runs the stream's parked pumps. */
+  wake(): void;
 }
 
 export class IbbManager {
@@ -225,6 +254,34 @@ export class IbbManager {
    * per session) because an <open> arrives before any per-stream setup.
    */
   receiveWindowBlocks = DEFAULT_IBB_WINDOW;
+  /**
+   * Blocks in flight across every sending stream of this session — the fair
+   * scheduler's budget (design §5.2, item 3). Per manager because it is per
+   * session: it bounds what all the streams together put into the one XMPP
+   * connection. When it is full, freed slots go to the waiting streams in
+   * turn, one block each, so a stream that has been sending for a minute and
+   * one that just started alternate rather than queue. A stream's own window
+   * still applies; one larger than this is capped by it.
+   */
+  sendWindowBlocks = DEFAULT_IBB_SESSION_WINDOW;
+  /**
+   * The shortest a block must go unanswered before it counts as parked at
+   * the receiver and stops holding a session slot; see
+   * DEFAULT_IBB_PARK_FLOOR_MS. The working threshold also scales with the
+   * measured ack latency, so a congested link (slow acks for everyone) keeps
+   * its fairness while a stalled consumer (one stream's acks withheld) does
+   * not freeze the rest.
+   */
+  parkFloorMs = DEFAULT_IBB_PARK_FLOOR_MS;
+  /** Session slots in use: counted blocks in flight plus unconsumed grants. */
+  #sendInFlight = 0;
+  /** Streams waiting for a session slot, in the order they asked. */
+  #sendQueue: SendEntry[] = [];
+  /** Counted blocks in flight, oldest first (insertion is dispatch order). */
+  #counted = new Set<SendSlot>();
+  /** Smoothed ack latency of counted blocks, as TCP smooths its RTT. */
+  #ackLatencyMs: number | undefined;
+  #reclaimTimer: ReturnType<typeof setTimeout> | undefined;
 
   private constructor(session: XmppSession) {
     this.#session = session;
@@ -249,6 +306,8 @@ export class IbbManager {
     this.#expectations.clear();
     this.#session.removeListener("stanza", this.#onStanza);
     this.#started = false;
+    if (this.#reclaimTimer !== undefined) clearTimeout(this.#reclaimTimer);
+    this.#reclaimTimer = undefined;
   }
 
   // ---------------------------------------------------------------- outbound
@@ -412,8 +471,11 @@ export class IbbManager {
       for (const waiter of waiters) waiter();
     };
 
-    const settle = () => {
+    const settle = (slot: SendSlot, acked: boolean) => {
       inFlight--;
+      // The session slot first: the stream woken below may be the one it goes
+      // to next, and it should find the grant already there.
+      this.#endSendSlot(slot, acked);
       wake(slotWaiters.splice(0));
       if (inFlight === 0) wake(drainWaiters.splice(0));
     };
@@ -433,13 +495,14 @@ export class IbbManager {
       seq = (seq + 1) % 65536;
       const ordinal = dispatched++;
       inFlight++;
+      const slot = this.#startSendSlot();
       // The rejection handler is attached here, at dispatch, not where the
       // block is awaited: with a window the other in-flight blocks reject
       // with nobody awaiting them, and an unhandled rejection is fatal.
       this.#request(to, from, data, blockTimeoutMs).then(
         () => {
           hooks?.onActivity?.();
-          settle();
+          settle(slot, true);
         },
         (err: unknown) => {
           const error = fromXmppError(err);
@@ -452,7 +515,7 @@ export class IbbManager {
             failed = { ordinal, error };
             if (first) hooks?.onFail?.(error);
           }
-          settle();
+          settle(slot, false);
         },
       );
     };
@@ -473,16 +536,62 @@ export class IbbManager {
       if (closed) throw new HttpxError("stream-error", "IBB stream closed");
     };
 
-    /** Admits blocks while the buffer holds them and the window has room. */
-    const pump = async (take: () => Uint8Array, hasBlock: () => boolean) => {
-      while (hasBlock()) {
-        throwIfFailed();
-        throwIfPeerClosed();
-        if (inFlight >= window) {
-          await new Promise<void>((resolve) => slotWaiters.push(resolve));
-          continue; // re-check: another writer may have taken the slot
+    /**
+     * Whether the buffer holds a block to send: a full one, or — once the
+     * stream is closing, or when every write is flushed — whatever is left.
+     * Tested at take time, never latched: a concurrent write() or close() can
+     * change the answer while a pump is parked, and a stale "there was a
+     * remainder" would send a zero-length block, burning a seq and a round
+     * trip.
+     */
+    const hasBlock = () =>
+      buffered.size >= blockSize ||
+      ((closed || hooks?.flushEachWrite === true) && buffered.size > 0);
+    /** Never more than one block's worth, whoever calls it. */
+    const take = () => buffered.take(Math.min(blockSize, buffered.size));
+
+    const park = () => new Promise<void>((resolve) => slotWaiters.push(resolve));
+
+    const entry: SendEntry = {
+      granted: 0,
+      wants: () =>
+        !failed && !closedByPeer && hasBlock() && inFlight + entry.granted < window,
+      wake: () => wake(slotWaiters.splice(0)),
+    };
+
+    /** Session slots reserved for this stream that no pump is going to use. */
+    const giveBack = () => {
+      while (entry.granted > 0) {
+        entry.granted--;
+        this.#releaseSendSlot();
+      }
+    };
+
+    /**
+     * Admits blocks while the buffer holds them, the stream's own window has
+     * room, and the session scheduler grants a slot. The grant is consumed
+     * and the block taken, encoded and sent in one synchronous step: no await
+     * between them, however long the wait for the grant was.
+     */
+    const pump = async () => {
+      try {
+        while (hasBlock()) {
+          throwIfFailed();
+          throwIfPeerClosed();
+          if (inFlight >= window) {
+            await park();
+            continue; // re-check: another writer may have taken the slot
+          }
+          if (entry.granted > 0) {
+            entry.granted--;
+          } else if (!this.#acquireSendSlot(entry)) {
+            await park();
+            continue; // re-check: woken by a grant, or to find it moot
+          }
+          dispatch(take());
         }
-        dispatch(take());
+      } finally {
+        giveBack();
       }
     };
 
@@ -500,18 +609,7 @@ export class IbbManager {
       write: async (bytes: Uint8Array): Promise<void> => {
         ensureUsable();
         buffered.push(bytes);
-        if (hooks?.flushEachWrite) {
-          // Tested at take time, like close()'s tail (see there).
-          await pump(
-            () => buffered.take(Math.min(blockSize, buffered.size)),
-            () => buffered.size > 0,
-          );
-          return;
-        }
-        await pump(
-          () => buffered.take(blockSize),
-          () => buffered.size >= blockSize,
-        );
+        await pump();
       },
       close: async (): Promise<void> => {
         // A block that failed before the peer closed is still this stream's
@@ -520,15 +618,8 @@ export class IbbManager {
         if (closedByPeer) return;
         ensureUsable();
         closed = true;
-        // Tested at take time, not latched on entry: an un-awaited write()
-        // racing this one can drain the buffer while close()'s pump is parked
-        // on a window slot, and a latched "there was a remainder" would then
-        // send a zero-length block, burning a seq and a round trip.
         try {
-          await pump(
-            () => buffered.drain(),
-            () => buffered.size > 0,
-          );
+          await pump();
         } catch (err) {
           if (!failed && closedByPeer) return;
           throw err;
@@ -581,6 +672,129 @@ export class IbbManager {
     };
 
     return { stream, peerClosed };
+  }
+
+  // ------------------------------------------------------ session scheduler
+
+  #sendLimit(): number {
+    return clampWindow(this.sendWindowBlocks, DEFAULT_IBB_SESSION_WINDOW);
+  }
+
+  /**
+   * A slot for one block of `entry`, now — or false, with `entry` queued for
+   * the next one to free. Nobody jumps the queue: while streams are waiting,
+   * a newcomer waits behind them even if it asked at the instant a slot
+   * freed.
+   */
+  #acquireSendSlot(entry: SendEntry): boolean {
+    this.#reclaimParked();
+    // Having just granted, either the budget is full or nobody is waiting —
+    // so a free slot here is never one a waiting stream was owed.
+    this.#grantSendSlots();
+    if (this.#sendInFlight < this.#sendLimit()) {
+      this.#sendInFlight++;
+      return true;
+    }
+    if (!this.#sendQueue.includes(entry)) this.#sendQueue.push(entry);
+    this.#armReclaim();
+    return false;
+  }
+
+  /** A grant went unused. */
+  #releaseSendSlot(): void {
+    this.#sendInFlight--;
+    this.#grantSendSlots();
+  }
+
+  /** A block is about to be dispatched: its reservation becomes a slot. */
+  #startSendSlot(): SendSlot {
+    const slot: SendSlot = { dispatchedAt: now(), counted: true };
+    this.#counted.add(slot);
+    return slot;
+  }
+
+  /**
+   * A block settled. Only a block still counted gives a slot back — a parked
+   * one already did — and only an ack of a counted block is a latency sample:
+   * a parked block's wait measures the receiver's patience, not the link.
+   */
+  #endSendSlot(slot: SendSlot, acked: boolean): void {
+    if (!slot.counted) return;
+    slot.counted = false;
+    this.#counted.delete(slot);
+    if (acked) {
+      const sample = now() - slot.dispatchedAt;
+      this.#ackLatencyMs =
+        this.#ackLatencyMs === undefined
+          ? sample
+          : this.#ackLatencyMs + (sample - this.#ackLatencyMs) / 8;
+    }
+    this.#releaseSendSlot();
+  }
+
+  #parkThresholdMs(): number {
+    const floor = Number.isFinite(this.parkFloorMs) ? Math.max(0, this.parkFloorMs) : DEFAULT_IBB_PARK_FLOOR_MS;
+    return Math.max(floor, IBB_PARK_FACTOR * (this.#ackLatencyMs ?? 0));
+  }
+
+  /**
+   * Stops counting blocks that have waited past the threshold. The set is in
+   * dispatch order, so the first young block ends the sweep.
+   */
+  #reclaimParked(): void {
+    // Until one ack has been timed, "slower than usual" means nothing: on a
+    // link whose round trip exceeds the floor, the first window would be
+    // declared parked before its first answer could possibly arrive. The
+    // sample is session-wide, so one stalled peer cannot withhold it — only a
+    // session where nothing at all is being answered, and nothing flows there.
+    if (this.#ackLatencyMs === undefined) return;
+    const cutoff = now() - this.#parkThresholdMs();
+    for (const slot of this.#counted) {
+      if (slot.dispatchedAt > cutoff) break;
+      slot.counted = false;
+      this.#counted.delete(slot);
+      this.#sendInFlight--;
+    }
+  }
+
+  /**
+   * While anyone waits, wake up when the oldest counted block would become
+   * parked: otherwise a budget held entirely by blocks the receiver will
+   * never answer frees no slot until their IQ deadlines, minutes away.
+   */
+  #armReclaim(): void {
+    if (this.#reclaimTimer !== undefined || this.#sendQueue.length === 0) return;
+    if (this.#ackLatencyMs === undefined) return; // see #reclaimParked
+    const oldest = this.#counted.values().next();
+    if (oldest.done) return;
+    const due = oldest.value.dispatchedAt + this.#parkThresholdMs() - now();
+    this.#reclaimTimer = setTimeout(() => {
+      this.#reclaimTimer = undefined;
+      this.#reclaimParked();
+      this.#grantSendSlots();
+    }, Math.max(1, Math.ceil(due)));
+    (this.#reclaimTimer as { unref?: () => void }).unref?.();
+  }
+
+  /**
+   * Hands free slots to waiting streams in turn, one each. A stream that
+   * wants another slot asks again and joins the back of the queue — which is
+   * all the round-robin there is. A stream that no longer wants one (drained,
+   * failed, closed, its own window full) is dropped from the queue and woken
+   * anyway, so a pump parked on it re-evaluates instead of waiting forever.
+   */
+  #grantSendSlots(): void {
+    while (this.#sendInFlight < this.#sendLimit() && this.#sendQueue.length > 0) {
+      const entry = this.#sendQueue.shift()!;
+      if (!entry.wants()) {
+        entry.wake();
+        continue;
+      }
+      entry.granted++;
+      this.#sendInFlight++;
+      entry.wake();
+    }
+    this.#armReclaim();
   }
 
   async #request(

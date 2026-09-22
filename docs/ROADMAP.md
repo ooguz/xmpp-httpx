@@ -407,11 +407,15 @@ on the other end.
   `connect()` checks. One wire form (`<req method='CONNECT'>`) until the XSF
   answers — decided 2026-09-22; the `<connect>` companion of design §4.2 is
   additive when needed (a decoder and a disco-driven choice).
-- [ ] **Fair scheduling** (M): many concurrent streams share one XMPP
-  connection; the sender should round-robin blocks across active streams so
-  one large download cannot starve twenty small ones. A per-session scheduler
-  in front of the IBB sender — the window makes this both possible and
-  necessary, since a single stream can now hold several slots.
+- [x] **Fair scheduling** (M, 2026-09-22): a per-session budget of IBB blocks
+  in flight (`ibbSessionWindow`, 16) in front of every stream's own window;
+  when it is full, freed slots are granted to waiting streams in turn, one
+  block each. Grants are reserved, then consumed inside the synchronous
+  take-encode-send step. Blocks unanswered past `max(250 ms, 4 × ack
+  latency)` are "parked" and stop counting, so a receiver withholding acks
+  cannot freeze the session (found by review in the first cut). Block-fair, not byte-fair (streams on one session
+  share a block size); `chunkedBase64`, which has no acks and so no window,
+  is outside it.
 - [x] **Tunnel-aware watchdogs** (S, 2026-09-22): the idle timeout is per
   stream; a duplex defaults to `false` (no idle timer, no stretched
   ack-withholding deadline), bodies keep theirs. The sender's per-block ack

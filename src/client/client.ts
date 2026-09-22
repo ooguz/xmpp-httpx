@@ -64,9 +64,17 @@ export interface HttpxClientOptions {
    * IBB blocks kept in flight when streaming a request body, and the number
    * an inbound response body may run ahead before acks are withheld. Default
    * 8. One block costs a round trip, so this is the multiplier on a
-   * high-latency path; 1 restores the block-at-a-time sender.
+   * high-latency path; 1 restores the block-at-a-time sender. The
+   * session budget (`ibbSessionWindow`) caps it.
    */
   ibbWindow?: number;
+  /**
+   * IBB blocks in flight across every stream on this session together — the
+   * fair scheduler's budget. Default 16. When it is full, freed slots go to
+   * waiting streams in turn, so one large transfer cannot starve the rest.
+   * Per session: shared with anything else using IBB on it.
+   */
+  ibbSessionWindow?: number;
   /**
    * Decoded bytes per IBB block for *request* bodies. XEP-0332 gives the
    * responder no way to advertise a limit for those, so unlike the response
@@ -198,6 +206,9 @@ export class HttpxClient {
       // Per session, not per stream: an <open> arrives before any per-stream
       // setup exists. Shared with anything else using IBB on this session.
       this.#ibb.receiveWindowBlocks = options.ibbWindow;
+    }
+    if (options.ibbSessionWindow !== undefined) {
+      this.#ibb.sendWindowBlocks = options.ibbSessionWindow;
     }
     this.#registry = createDefaultRegistry(
       session,

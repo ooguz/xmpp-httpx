@@ -71,6 +71,14 @@ rather than an accident.
   one, because it is itself the reason nothing is arriving — stretched rather
   than stopped, so a consumer that walks away without cancelling is still
   reaped instead of holding the stream for the session.
+- **One budget per session.** Besides its own window, every sending stream
+  on a session draws from a shared budget of blocks in flight
+  (`sendWindowBlocks`, default 16). When it is full, freed slots go to the
+  waiting streams in turn, one block each. A block the receiver has left
+  unanswered for `max(250 ms, 4 × ack latency)` is taken to be parked there
+  and stops counting, so a peer that withholds acks cannot freeze the other
+  streams. Nothing changes on the wire; this only decides whose block is
+  next.
 - A block whose IQ fails closes the stream with that block's error, latched to
   the earliest block in send order — a dead receiver rejects every
   outstanding block at once and rejection order is not send order.

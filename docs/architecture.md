@@ -212,6 +212,50 @@ walks away without cancelling keeps its buffered bytes and every parked
 handler for the life of the session. The clock is stretched instead:
 `idleTimeoutMs × (receiveWindowBlocks + 1)` while an ack is withheld.
 
+#### The session scheduler
+
+A window per stream makes a single transfer fast and makes many transfers
+unfair: every stream holds `window` blocks at once, they all land in the one
+XMPP connection's send queue, and a small page's first block waits behind
+every large download's full window. So the manager — one per session — also
+keeps a budget for all its streams together, `sendWindowBlocks`
+(`DEFAULT_IBB_SESSION_WINDOW` = 16, twice a stream's default window, so a
+stream alone at the default window runs exactly as fast as before; a stream
+configured with a window above the budget is capped by it). A block needs a
+slot in both.
+
+When the budget is full, a stream that wants to send joins a queue. A settled
+block (acked or failed) frees its slot, and the slot is *granted* to the
+stream at the head of the queue: reserved for it, counted as in use, and
+consumed by that stream's pump when it next runs — so no other stream can
+take it in between, and the grant, the take, the encoding and the send stay
+separate from one another only by the wait for the pump, never by an `await`
+inside the synchronous step. A stream that wants more asks again and goes to
+the back. That is the whole round-robin: one block per stream per turn. A
+stream that no longer wants its turn (drained, failed, closed, its own window
+full) is dropped from the queue and woken anyway, so a pump parked on it
+re-evaluates rather than waiting forever; grants a pump will not use are
+given back when it exits. Fairness is by blocks, not bytes: streams on one
+session normally share a block size (it comes from the same stanza budget),
+and byte-fair deficit round-robin is the next step if they stop doing so.
+
+A slot is *not* held until the ack. The budget bounds what waits in the
+connection's send queue, and a block the receiver is deliberately not acking
+(its consumer is not reading) is not waiting there. The first version counted
+it anyway, and review found the result: two stalled streams at the default
+window held all 16 slots, and every other stream on the session — on a
+server, every other client — froze until those blocks' IQ deadlines, minutes
+later. So a block that has gone unanswered for `max(parkFloorMs, 4 × smoothed
+ack latency)` (floor 250 ms; latency smoothed as TCP smooths RTT, from acks
+of blocks that were still counted) is *parked*: it stops counting, and its
+stream's own window is what still holds it. On a congested link every ack is
+slow, the threshold grows with them, and nothing is parked; with a stalled
+consumer only that stream's blocks age past it. While streams wait, a timer
+fires when the oldest counted block would turn parked, since nothing else
+would free a slot. Nothing is parked before the session has timed one ack,
+so a link slower than the floor does not start with a burst.
+Tests: `test/integration/ibb-fair.test.ts`.
+
 Block size is the requester's call, since it is the requester's stanza limit
 that has to carry the base64: it comes from `<req maxChunkSize=…>`, which
 `stanzaBudgets(maxStanzaBytes)` derives from a known server limit. 64 KiB
@@ -504,10 +548,12 @@ All defaults live in `src/constants.ts`:
 `HttpxClientOptions`: `defaultTimeoutMs`, `maxChunkSize`, `accept: { ibb?,
 sipub?, jingle? }` (all default true), `discover` (true), `inlineBudgetBytes`,
 `preferredStreams`, `maxBufferedBytes`, `idleTimeoutMs`, `ibbWindow` (8),
+`ibbSessionWindow` (16, all streams on the session together),
 `ibbBlockSize` (request bodies only), `from` (required for components),
 `socks5` (Node-only, see `createSocks5Adapter` in `xmpp-httpx/node`).
 
 `HttpxServerOptions`: `authorize`, `inlineBudgetBytes`, `preferredStreams`,
-`maxRequestBodyBytes`, `idleTimeoutMs`, `ibbWindow` (8), `ibbBlockSize` (a cap
-on what the requester asked for), `advertise` (true), `onError`, `socks5`
+`maxRequestBodyBytes`, `idleTimeoutMs`, `ibbWindow` (8), `ibbSessionWindow`
+(16), `ibbBlockSize` (a cap on what the requester asked for), `advertise`
+(true), `tunnels` (false; CONNECT and `urn:xmpp:http:connect:0`), `onError`, `socks5`
 (same as above).

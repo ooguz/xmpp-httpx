@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **Fair IBB scheduling across streams.** Every sending IBB stream on a
+  session now also draws from one shared budget of blocks in flight
+  (`ibbSessionWindow`, default 16, on `HttpxClient` and `HttpxServer`), and
+  when it is full, freed slots go to the waiting streams in turn, one block
+  each. Before, each stream held its whole window regardless, so a large
+  download's blocks queued ahead of a small page's in the one XMPP
+  connection. A stream on its own at the default window is exactly as fast
+  as before (the default budget is twice that window); a window configured
+  above the budget is capped by it. A block the receiver leaves unanswered
+  for `max(250 ms, 4 × the measured ack latency)` counts as parked at the
+  receiver and gives its slot back, so a peer withholding acks — a consumer
+  that is not reading — cannot hold the budget and freeze every other stream
+  on the session. The grant for a slot is
+  reserved for the stream it goes to and consumed in the same synchronous
+  step that takes, encodes and sends the block, so ordering is untouched.
+  Every path now takes at most one block from the buffer by construction;
+  `close()` used to drain the whole remainder at once and stayed within a
+  block only because of the order parked pumps were woken in.
+
 ## 0.9.0 — 2026-09-22
 
 - **Windowed IBB sending.** Up to `ibbWindow` blocks (default 8) are in flight
