@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { gzipSync } from "node:zlib";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createOriginProxyHandler } from "../../src/node/origin-proxy.js";
 import type { HttpxServerRequest } from "../../src/server/server.js";
 
@@ -55,3 +58,43 @@ describe("origin proxy request targets", () => {
     expect((response as { status?: number }).status).toBe(400);
   });
 });
+
+describe("origin proxy response lengths", () => {
+  // A real local origin: whether the length survives depends on what fetch
+  // did to the body, which only a real response exercises.
+  let origin: Server;
+  let base: string;
+  beforeAll(async () => {
+    origin = createServer((req, res) => {
+      if (req.url === "/plain") {
+        res.writeHead(200, { "content-type": "text/plain", "content-length": "5" });
+        res.end("hello");
+      } else {
+        const body = gzipSync("hello, compressed");
+        res.writeHead(200, {
+          "content-type": "text/plain",
+          "content-encoding": "gzip",
+          "content-length": String(body.length),
+        });
+        res.end(body);
+      }
+    });
+    await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(origin.address() as AddressInfo).port}`;
+  });
+  afterAll(() => new Promise<void>((resolve) => origin.close(() => resolve())));
+
+  it("keeps an uncompressed response's content-length, so it can go inline", async () => {
+    const response = (await createOriginProxyHandler(base)(request("/plain"))) as Response;
+    expect(response.headers.get("content-length")).toBe("5");
+    expect(await response.text()).toBe("hello");
+  });
+
+  it("drops content-length and content-encoding once fetch has decompressed", async () => {
+    const response = (await createOriginProxyHandler(base)(request("/gz"))) as Response;
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBeNull();
+    expect(await response.text()).toBe("hello, compressed");
+  });
+});
+

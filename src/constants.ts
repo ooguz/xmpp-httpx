@@ -7,6 +7,13 @@ export const NS_HTTPX = "urn:xmpp:http";
  * how it finds out. Provisional, pending the XSF (n146 design §4.3).
  */
 export const NS_HTTPX_ABSOLUTE_FORM = "urn:xmpp:http#absolute-form";
+/**
+ * "This entity answers CONNECT with a tunnel" (n146 design §4.4). XEP-0332
+ * v0.5.1 excludes CONNECT outright, so a requester must not send one to a
+ * peer that has not said so. Provisional, pending the XSF; if CONNECT moves
+ * to a companion `<connect/>` element, that element lives in this namespace.
+ */
+export const NS_HTTPX_CONNECT = "urn:xmpp:http:connect:0";
 /** XEP-0131: Stanza Headers and Internet Metadata (SHIM). */
 export const NS_SHIM = "http://jabber.org/protocol/shim";
 /** XEP-0047: In-Band Bytestreams. */

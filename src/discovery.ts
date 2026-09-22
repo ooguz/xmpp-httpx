@@ -52,7 +52,8 @@ export function httpxFeatures(extra: readonly string[] = []): string[] {
  * Note: this registers the session's only disco#info get-handler (@xmpp/iq
  * routes each namespace/tag pair to one handler). If the application already
  * answers disco#info itself, skip advertiseHttpx() and add httpxFeatures()
- * to the application's own response instead.
+ * to the application's own response instead — httpxFeatures([NS_HTTPX_CONNECT])
+ * on a server with `tunnels: true`, which the library cannot add for you.
  */
 export function advertiseHttpx(
   session: XmppSession,

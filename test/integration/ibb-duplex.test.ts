@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HttpxClient } from "../../src/client/client.js";
 import { encodeReq } from "../../src/codec/req.js";
 import { decodeResp, encodeResp } from "../../src/codec/resp.js";
-import { NS_HTTPX, NS_IBB, NS_STANZAS } from "../../src/constants.js";
+import {
+  NS_DISCO_INFO,
+  NS_HTTPX,
+  NS_HTTPX_CONNECT,
+  NS_IBB,
+  NS_STANZAS,
+} from "../../src/constants.js";
 import { HttpxError } from "../../src/errors.js";
 import { IbbManager, type IbbDuplex } from "../../src/ibb/ibb.js";
 import { allowAll } from "../../src/server/policy.js";
@@ -846,9 +852,6 @@ describe("per-stream watchdogs reach HttpxClient", () => {
     const server = new HttpxServer(serverSession, { authorize: allowAll() });
     server.handle(() => ({
       status: 200,
-      // A length, so the body streams: without one the server buffers the
-      // whole stream first (Number(null) is 0 — a separate, older bug).
-      headers: { "content-length": "100000" },
       body: new ReadableStream<Uint8Array>({
         start: (controller) => controller.enqueue(payload(100)), // then silence
       }),
@@ -911,6 +914,7 @@ function setup(handler: HttpxHandler, serverOptions: HttpxServerOptions = {}) {
   const server = new HttpxServer(serverSession, {
     authorize: allowAll(),
     onError: (err) => errors.push(err),
+    tunnels: true,
     ...serverOptions,
   });
   server.handle(handler);
@@ -1292,3 +1296,135 @@ describe("CONNECT tunnels", () => {
     void connecting;
   });
 });
+
+describe("urn:xmpp:http:connect:0", () => {
+  const rawConnect = (session: MockSession) =>
+    session.iqCaller.request(
+      xml(
+        "iq",
+        { type: "set", to: "server@example.org" },
+        encodeReq({
+          method: "CONNECT",
+          resource: "example.org:443",
+          version: "1.1",
+          accept: { ibb: true, sipub: false, jingle: false },
+          headers: new Headers(),
+        }),
+      ),
+    );
+  const discoFeatures = async (session: MockSession) => {
+    const reply = await session.iqCaller.request(
+      xml("iq", { type: "get", to: "server@example.org" }, xml("query", { xmlns: NS_DISCO_INFO })),
+    );
+    return reply
+      .getChild("query", NS_DISCO_INFO)!
+      .getChildren("feature")
+      .map((f) => f.attrs["var"]);
+  };
+
+  it("a server without `tunnels` answers CONNECT 501 and never shows it to the handler", async () => {
+    let called = false;
+    const { clientSession } = setup(
+      () => {
+        called = true;
+        return { status: 200, tunnel: () => {} };
+      },
+      { tunnels: false },
+    );
+    const reply = await rawConnect(clientSession);
+    expect(decodeResp(reply.getChild("resp", NS_HTTPX)!).statusCode).toBe(501);
+    expect(called).toBe(false);
+    expect(await discoFeatures(clientSession)).not.toContain(NS_HTTPX_CONNECT);
+  });
+
+  it("a server with `tunnels` advertises the feature", async () => {
+    const { clientSession } = setup(() => ({ status: 403 }));
+    const features = await discoFeatures(clientSession);
+    expect(features).toContain(NS_HTTPX_CONNECT);
+    expect(features).toContain(NS_HTTPX);
+  });
+
+  it("connect() refuses a peer that does not advertise tunnels, before sending CONNECT", async () => {
+    const [clientSession, serverSession] = createSessionPair();
+    const server = new HttpxServer(serverSession, { authorize: allowAll() }); // no tunnels
+    let reqs = 0;
+    server.handle(() => ({ status: 200 }));
+    server.start();
+    serverSession.on("stanza", (stanza) => {
+      if (stanza.getChild("req", NS_HTTPX)) reqs++;
+    });
+    const client = new HttpxClient(clientSession); // discover on (the default)
+    cleanups.push(async () => {
+      await client.close();
+      server.stop();
+    });
+    const err = await client
+      .connect("server@example.org", { authority: "example.org:443" })
+      .catch((e: unknown) => e);
+    expect((err as HttpxError).code).toBe("not-implemented");
+    expect((err as HttpxError).message).toContain(NS_HTTPX_CONNECT);
+    expect(reqs).toBe(0);
+    // Plain requests to the same peer are unaffected.
+    expect((await client.request("server@example.org")).statusCode).toBe(200);
+  });
+
+  it("connect() goes ahead against a peer that advertises tunnels", async () => {
+    const [clientSession, serverSession] = createSessionPair();
+    const server = new HttpxServer(serverSession, { authorize: allowAll(), tunnels: true });
+    server.handle(() => ({ status: 200, tunnel: (t: HttpxTunnel) => void t.close() }));
+    server.start();
+    const client = new HttpxClient(clientSession);
+    cleanups.push(async () => {
+      await client.close();
+      server.stop();
+    });
+    const { response, tunnel } = await client.connect("server@example.org", {
+      authority: "example.org:443",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(await ending(tunnel!.readable.getReader())).toBe("eof");
+  });
+
+  it("connect() also refuses a peer that does not advertise urn:xmpp:http itself", async () => {
+    const [clientSession, serverSession] = createSessionPair();
+    serverSession.iqCallee.get(NS_DISCO_INFO, "query", () =>
+      xml(
+        "query",
+        { xmlns: NS_DISCO_INFO },
+        xml("identity", { category: "client", type: "pc" }),
+        xml("feature", { var: NS_HTTPX_CONNECT }), // and nothing of XEP-0332
+      ),
+    );
+    const client = new HttpxClient(clientSession);
+    cleanups.push(() => client.close());
+    const err = await client
+      .connect("server@example.org", { authority: "example.org:443" })
+      .catch((e: unknown) => e);
+    expect((err as HttpxError).code).toBe("not-implemented");
+    expect((err as HttpxError).message).toContain(`does not advertise ${NS_HTTPX}`);
+  });
+
+  it("connect() goes ahead when the peer's disco gives no answer (unknown)", async () => {
+    // As for plain requests: many deployments answer disco poorly, and only
+    // an explicit feature list without the feature is a refusal.
+    const [clientSession, serverSession] = createSessionPair();
+    const server = new HttpxServer(serverSession, {
+      authorize: allowAll(),
+      tunnels: true,
+      advertise: false, // and nobody else answers disco: service-unavailable
+    });
+    server.handle(() => ({ status: 200, tunnel: (t: HttpxTunnel) => void t.close() }));
+    server.start();
+    const client = new HttpxClient(clientSession);
+    cleanups.push(async () => {
+      await client.close();
+      server.stop();
+    });
+    const { response, tunnel } = await client.connect("server@example.org", {
+      authority: "example.org:443",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(await ending(tunnel!.readable.getReader())).toBe("eof");
+  });
+});
+

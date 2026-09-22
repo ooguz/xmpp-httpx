@@ -167,7 +167,9 @@ export function createStaticHandler(
 
     return {
       status: 200,
-      headers,
+      // The length is what lets a small file go inline in the <resp> rather
+      // than as a stream of its own, and what a sipub/jingle offer states.
+      headers: { ...headers, "content-length": String(info.size) },
       // Streamed, so a large file is never held in memory: the transport
       // decides how to chunk it.
       body: Readable.toWeb(createReadStream(target)) as ReadableStream<Uint8Array>,

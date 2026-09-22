@@ -164,6 +164,23 @@ function tryDecodeUtf8(bytes: Uint8Array): string | undefined {
   }
 }
 
+/**
+ * Whether any stream mechanism is open to this body — the server's
+ * preference list meeting the requester's accept flags. When none is, a body
+ * of unknown length can only be sent if it turns out to fit inline.
+ */
+export function canStream(input: Pick<SelectInput, "accept" | "preferredStreams">): boolean {
+  return input.preferredStreams.some((mechanism) =>
+    mechanism === "ibb"
+      ? input.accept.ibb
+      : mechanism === "chunkedBase64"
+        ? input.accept.chunked
+        : mechanism === "sipub"
+          ? input.accept.sipub
+          : input.accept.jingle,
+  );
+}
+
 function selectStream(input: SelectInput): EncodingDecision {
   for (const mechanism of input.preferredStreams) {
     if (mechanism === "ibb" && input.accept.ibb) {

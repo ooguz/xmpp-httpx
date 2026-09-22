@@ -134,6 +134,10 @@ rather than an accident.
   500-byte ClientHello is followed by nothing until the ServerHello — so a
   held tail is a deadlock. Coalescing is kept where it is free: bytes written
   while the window is full leave in full blocks.
+- **CONNECT is opt-in on the server** (`tunnels: true`), which also
+  advertises `urn:xmpp:http:connect:0`. Without it CONNECT is answered 501
+  before the handler runs — XEP-0332's answer to an unsupported method — so a
+  handler written for GET and POST never sees one.
 - **CONNECT on the server.** The handler decides the status. A 2xx whose
   handler result carries `tunnel` becomes `<resp statusCode='200'
   statusMessage='Connection Established'>` with `<data><ibb sid/></data>`,
@@ -146,6 +150,16 @@ rather than an accident.
   other method is a handler bug, answered 500. If the stream cannot be
   opened, `tunnel` is still called — with a tunnel that is already dead — so
   the handler's ordinary error path is where it closes the destination.
+- **CONNECT on the client** refuses a peer whose disco lists no
+  `urn:xmpp:http:connect:0` (design §4.4), before sending anything; as
+  everywhere, no usable disco answer means "unknown" and it goes ahead.
+- **One wire form for now** (decided 2026-09-22): `<req method='CONNECT'>`,
+  as a revised XEP-0332 would carry it. The companion `<connect
+  xmlns='urn:xmpp:http:connect:0' host port/>` of design §4.2 is not
+  implemented: its shape is still a draft, and both the API (`connect()`,
+  and a handler seeing `method` CONNECT with an authority-form `resource`)
+  and the feature namespace are already wire-agnostic, so adding it later
+  is a decoder plus a disco-driven choice, not a change for callers.
 - **CONNECT on the client** is `HttpxClient.connect()`, not `request()`: the
   answer is a stream in both directions and `request()` can only return a
   body. It sends `sipub='false' jingle='false'` (and `ibb` at its default,
@@ -269,6 +283,20 @@ implementation has to agree with:
   XEP-0065 §5.3.1 construction with the Jingle roles supplying the JIDs, which is
   why the existing `computeDomain()` is reused.
 
+## Response bodies of unknown length
+
+- A handler body with a valid `Content-Length` (RFC 9110 `1*DIGIT`, or a list
+  of identical values) that fits the inline budget is buffered and inlined;
+  anything else is streamed as it arrives. With no length it is *not* read
+  ahead: an endless or trickled body starts flowing at once.
+- If no stream mechanism is open to the requester (its accept flags and our
+  `preferredStreams` share nothing), a length-less body is read up to the
+  inline budget and no further: inlined if it ended by then, otherwise
+  cancelled and answered 413.
+- A streamed body of unknown length is offered over sipub/jingle with
+  `size='0'`, as those notes already say. The origin proxy and the static
+  handler both pass a length when they have one, so this is rare in practice.
+
 ## Request bodies
 
 - The `sipub`/`ibb`/`jingle` attributes of `<req>` describe what the
@@ -311,6 +339,10 @@ implementation has to agree with:
   errors and timeouts are treated as unknown and the request proceeds,
   because many deployments answer disco poorly and a hard failure would make
   the library unusable against them. Disable with `discover: false`.
+- `urn:xmpp:http:connect:0` is advertised by a server with `tunnels: true`
+  and checked by `HttpxClient.connect()`; see the duplex notes above. An
+  application answering disco itself (`advertise: false`) must add it —
+  `httpxFeatures([NS_HTTPX_CONNECT])` — or `connect()` refuses the server.
 - `urn:xmpp:http#absolute-form` is advertised alongside `urn:xmpp:http`
   (n146 design §4.3): v0.5.1 defines `resource` as a path, so a requester
   may send absolute-form only to a peer that says it takes it. Every entity

@@ -43,6 +43,31 @@ function setup(
 }
 
 describe("sipub transport (XEP-0137 over SI + IBB)", () => {
+  it("offers a streamed body with its declared size, not size='0'", async () => {
+    // A stream's Content-Length survives into the offer: XEP-0096 makes
+    // size required, and a strict receiver takes 0 for an empty file.
+    const body = patternBytes(150_000);
+    const { client, serverSession } = setup(
+      () => ({
+        status: 200,
+        headers: { "content-type": "application/octet-stream", "content-length": "150000" },
+        body: streamFromBytes(body),
+      }),
+      { preferredStreams: ["sipub"] },
+    );
+    const sizes: string[] = [];
+    serverSession.deliverHook = (stanza, deliver) => {
+      for (const file of stanza.toString().matchAll(/<file[^>]*\ssize="(\d+)"/g)) {
+        sizes.push(file[1]!);
+      }
+      queueMicrotask(deliver);
+    };
+    const resp = await client.request("server@example.org", { resource: "/pub" });
+    expect(await bytesFromStream(resp.body!)).toEqual(body);
+    expect(sizes.length).toBeGreaterThan(0);
+    expect(new Set(sizes)).toEqual(new Set(["150000"]));
+  });
+
   it("streams a response body via sipub", async () => {
     const body = patternBytes(150_000);
     const { client } = setup(

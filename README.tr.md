@@ -110,6 +110,30 @@ server.handle(createOriginProxyHandler("http://localhost:8080"));
 server.start();
 ```
 
+### Tüneller (CONNECT)
+
+Tünelle yanıtlanan bir CONNECT, baytları tek bir IBB oturumu üzerinden iki yönde taşır. Bu, CONNECT'i dışlayan XEP-0332 v0.5.1'e bilinçli bir eklemedir; ayrıntılar [protocol-notes.md](docs/protocol-notes.md#duplex-streams-connect-tunnels) içinde. Kütüphane hiçbir yere bağlanmaz. Hedefe handler bağlanır ve boruyu geri verir:
+
+```js
+const exit = new HttpxServer(xmpp, { authorize: allowList(["alice@example.org"]), tunnels: true });
+exit.handle(async (req) => {
+  if (req.method !== "CONNECT") return { status: 405 };
+  // … hedefe bağlan; olmazsa { status: 502 } döndür …
+  return {
+    status: 200,
+    tunnel: async (tunnel) => {
+      // tunnel.readable: karşıdan gelen baytlar; tunnel.write(): karşıya giden baytlar
+    },
+  };
+});
+exit.start();
+
+// Öbür uç:
+const { response, tunnel } = await httpx.connect("exit@example.org", { authority: "example.org:443" });
+```
+
+`tunnels: true`, `urn:xmpp:http:connect:0` özelliğini ilan eder. Bu seçenek yoksa CONNECT 501 alır ve handler'a hiç ulaşmaz. `connect()`, disco'sunda bu özellik bulunmayan bir peer'i reddeder. Half-close yoktur: iki taraftan birinin `close()` çağrısı iki yönü de kapatır. Tünelin boşta kalma zamanlayıcısı (watchdog) yoktur, bu yüzden kaybolan bir peer'i fark etmek uygulamanın işidir.
+
 ## Geçit komut satırı aracı
 
 Var olan bir siteyi tek satır kod yazmadan XMPP üzerine taşımak:

@@ -75,6 +75,13 @@ describe("static site handler", () => {
     expect(await bodyOf(response)).toBe("<h1>home</h1>");
   });
 
+  it("gives a GET its content-length, so a small file can go inline", async () => {
+    // Without it the server has to treat every file as a stream of unknown
+    // length: an IBB session and its round trips for 13 bytes.
+    const response = await handler(request("/index.html"));
+    expect(headersOf(response).get("content-length")).toBe("13");
+  });
+
   it("serves a file, with its type", async () => {
     const response = await handler(request("/style.css"));
     expect(statusOf(response)).toBe(200);

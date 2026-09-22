@@ -402,8 +402,11 @@ on the other end.
   both succeed via a tombstone); writes flush their sub-block tail at once,
   since a tunnel is interactive. On top of it `HttpxClient.connect()` and a
   handler's `{ status: 200, tunnel }`; the library dials nothing. IBB only —
-  an S5B duplex waits for the `fast` profile. The `<connect>` companion wire
-  form (design §4.2 caveat) is not implemented.
+  an S5B duplex waits for the `fast` profile. Tunnels are opt-in on the
+  server (`tunnels: true`) and advertised as `urn:xmpp:http:connect:0`, which
+  `connect()` checks. One wire form (`<req method='CONNECT'>`) until the XSF
+  answers — decided 2026-09-22; the `<connect>` companion of design §4.2 is
+  additive when needed (a decoder and a disco-driven choice).
 - [ ] **Fair scheduling** (M): many concurrent streams share one XMPP
   connection; the sender should round-robin blocks across active streams so
   one large download cannot starve twenty small ones. A per-session scheduler

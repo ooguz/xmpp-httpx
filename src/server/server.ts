@@ -10,6 +10,7 @@ import {
   HTTP_VERSION,
   MIN_CHUNK_SIZE,
   NS_HTTPX,
+  NS_HTTPX_CONNECT,
   NS_STANZAS,
 } from "../constants.js";
 import { advertiseHttpx } from "../discovery.js";
@@ -27,6 +28,7 @@ import { createDefaultRegistry } from "../transport/default-registry.js";
 import { inlineToBytes, isInline } from "../transport/inline.js";
 import type { TransportRegistry } from "../transport/registry.js";
 import {
+  canStream,
   resolveChunkSize,
   selectEncoding,
   type BodySource,
@@ -45,6 +47,7 @@ import {
 } from "../util/compression.js";
 import {
   bytesFromStream,
+  concatBytes,
   deferredStream,
   iterateStream,
   limitStream,
@@ -144,6 +147,17 @@ export interface HttpxServerOptions {
   /** Answer disco#info with the urn:xmpp:http feature. Default true. */
   advertise?: boolean;
   /**
+   * Accept CONNECT and hand the handler tunnels; advertises
+   * urn:xmpp:http:connect:0. Default false: CONNECT is answered 501 without
+   * reaching the handler, so a handler written for GET and POST never sees
+   * one — and a requester that checks disco never sends one.
+   *
+   * With `advertise: false` the feature is yours to add to your own disco
+   * answer — `httpxFeatures([NS_HTTPX_CONNECT])` — or HttpxClient.connect()
+   * will refuse this server.
+   */
+  tunnels?: boolean;
+  /**
    * Compress compressible response bodies when the requester sent
    * Accept-Encoding, and transparently decompress encoded request bodies.
    * Default true.
@@ -218,7 +232,10 @@ export class HttpxServer {
     );
     this.#session.iqCallee.set(NS_HTTPX, "req", (ctx) => this.#onReq(ctx));
     if (this.#options.advertise !== false) {
-      advertiseHttpx(this.#session);
+      advertiseHttpx(
+        this.#session,
+        this.#options.tunnels ? { extraFeatures: [NS_HTTPX_CONNECT] } : undefined,
+      );
     }
   }
 
@@ -269,6 +286,16 @@ export class HttpxServer {
     }
 
     if (req.method === "CONNECT") {
+      if (!this.#options.tunnels) {
+        // 501 is XEP-0332's answer to a method the entity does not support,
+        // which is exactly the situation: this server never offered tunnels.
+        return this.#respond({
+          status: 501,
+          statusMessage: "Not Implemented",
+          headers: new Headers(),
+          source: { kind: "empty" },
+        });
+      }
       return this.#onConnect(req, from, to);
     }
 
@@ -347,7 +374,7 @@ export class HttpxServer {
           );
         }
         normalized = await this.#maybeCompress(
-          await this.#normalizeResult(result),
+          await this.#normalizeResult(result, this.#canStream(request.accept)),
           req.headers,
         );
       }
@@ -444,7 +471,7 @@ export class HttpxServer {
       // Not a tunnel: an ordinary answer (typically 403/502/504, no body).
       let normalized: NormalizedResponse;
       try {
-        normalized = await this.#normalizeResult(result);
+        normalized = await this.#normalizeResult(result, this.#canStream(request.accept));
       } catch (err) {
         this.#options.onError?.(err, { from, resource: req.resource });
         return plain(500);
@@ -548,8 +575,17 @@ export class HttpxServer {
   }
 
   /** Buffers small streamed bodies so they can still be inlined. */
+  #canStream(accept: StreamAcceptFlags): boolean {
+    return canStream({
+      accept,
+      preferredStreams: this.#options.preferredStreams ?? ["ibb", "chunkedBase64"],
+    });
+  }
+
   async #normalizeResult(
     result: Response | HttpxHandlerResponse,
+    /** Whether a stream mechanism is open to this requester at all. */
+    streamable: boolean,
   ): Promise<NormalizedResponse> {
     const inlineBudget = this.#options.inlineBudgetBytes ?? DEFAULT_INLINE_BUDGET;
 
@@ -566,23 +602,7 @@ export class HttpxServer {
       if (result.body === null) {
         source = { kind: "empty" };
       } else {
-        const contentLength = Number(headers.get("content-length"));
-        if (
-          Number.isInteger(contentLength) &&
-          contentLength >= 0 &&
-          base64Length(contentLength) <= inlineBudget
-        ) {
-          const bytes = await bytesFromStream(result.body);
-          source = bytes.length === 0 ? { kind: "empty" } : { kind: "bytes", bytes };
-        } else {
-          source = {
-            kind: "stream",
-            ...(Number.isInteger(contentLength) && contentLength >= 0
-              ? { contentLength }
-              : {}),
-          };
-          stream = result.body;
-        }
+        ({ source, stream } = await streamSource(result.body, headers, inlineBudget, streamable));
       }
     } else {
       status = result.status ?? 200;
@@ -600,23 +620,7 @@ export class HttpxServer {
       } else if (body instanceof Uint8Array) {
         source = body.length === 0 ? { kind: "empty" } : { kind: "bytes", bytes: body };
       } else if (body instanceof ReadableStream) {
-        const contentLength = Number(headers.get("content-length"));
-        if (
-          Number.isInteger(contentLength) &&
-          contentLength >= 0 &&
-          base64Length(contentLength) <= inlineBudget
-        ) {
-          const bytes = await bytesFromStream(body);
-          source = bytes.length === 0 ? { kind: "empty" } : { kind: "bytes", bytes };
-        } else {
-          source = {
-            kind: "stream",
-            ...(Number.isInteger(contentLength) && contentLength >= 0
-              ? { contentLength }
-              : {}),
-          };
-          stream = body;
-        }
+        ({ source, stream } = await streamSource(body, headers, inlineBudget, streamable));
       } else {
         source = { kind: "element", element: body as Element };
       }
@@ -947,6 +951,70 @@ function deadTunnel(
     write: () => Promise.reject(error),
     close: () => Promise.reject(error),
     abort: () => Promise.resolve(),
+  };
+}
+
+/**
+ * RFC 9110 §8.6 Content-Length: `1*DIGIT`, or a list of identical values
+ * (what Headers makes of a repeated field). Anything else is no length.
+ *
+ * Not Number(): Number(null) and Number("") are 0, and Number also takes
+ * "0x10", "1e3" and " 12 ". The null case was the costly one — a streamed
+ * body with no Content-Length read as "0 bytes, fits inline", so the server
+ * buffered the whole stream before answering, and a stream that never ends
+ * never got an answer.
+ */
+export function parseContentLength(raw: string | null): number | undefined {
+  if (raw === null) return undefined;
+  const values = raw.split(",").map((v) => v.trim());
+  const first = values[0];
+  if (first === undefined || !/^[0-9]+$/.test(first)) return undefined;
+  if (values.some((v) => v !== first)) return undefined;
+  const length = Number(first);
+  return Number.isSafeInteger(length) ? length : undefined;
+}
+
+/**
+ * A streamed handler body: buffered (so it can still be inlined) only when a
+ * declared length says it fits the budget; otherwise streamed as it comes.
+ *
+ * One exception: when no stream mechanism is open to this requester, a body
+ * of unknown length can only go inline, so it is read — up to the budget and
+ * no further — to find out whether it fits. Past the budget it cannot be sent
+ * at all: the rest is cancelled, and #respond answers 413 as it would for any
+ * body too large to send.
+ */
+async function streamSource(
+  body: ReadableStream<Uint8Array>,
+  headers: Headers,
+  inlineBudget: number,
+  streamable: boolean,
+): Promise<{ source: BodySource; stream: ReadableStream<Uint8Array> | undefined }> {
+  const contentLength = parseContentLength(headers.get("content-length"));
+  const asBytes = (bytes: Uint8Array) => ({
+    source: bytes.length === 0 ? ({ kind: "empty" } as const) : ({ kind: "bytes", bytes } as const),
+    stream: undefined,
+  });
+  if (contentLength !== undefined && base64Length(contentLength) <= inlineBudget) {
+    return asBytes(await bytesFromStream(body));
+  }
+  if (contentLength === undefined && !streamable) {
+    const reader = body.getReader();
+    const parts: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return asBytes(concatBytes(parts));
+      parts.push(value);
+      total += value.length;
+      if (base64Length(total) > inlineBudget) break;
+    }
+    void reader.cancel(new HttpxError("payload-too-large", "no way to send this body")).catch(() => {});
+    return { source: { kind: "stream" }, stream: undefined };
+  }
+  return {
+    source: { kind: "stream", ...(contentLength !== undefined ? { contentLength } : {}) },
+    stream: body,
   };
 }
 

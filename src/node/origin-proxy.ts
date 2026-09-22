@@ -87,9 +87,13 @@ export function createOriginProxyHandler(
     const responseHeaders = new Headers(upstream.headers);
     for (const name of HOP_BY_HOP) responseHeaders.delete(name);
     // fetch transparently decompresses but keeps the original headers;
-    // they would misdescribe the bytes we actually forward.
+    // they would misdescribe the bytes we actually forward. Without a coding
+    // the length is still true, and it is what lets a small page go inline.
+    const coding = responseHeaders.get("content-encoding");
+    if (coding !== null && coding.trim().toLowerCase() !== "identity") {
+      responseHeaders.delete("content-length");
+    }
     responseHeaders.delete("content-encoding");
-    responseHeaders.delete("content-length");
 
     return new Response(upstream.body, {
       status: upstream.status,

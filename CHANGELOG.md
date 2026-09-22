@@ -55,6 +55,24 @@
   handed to the handler, already dead, so its error path closes the
   destination socket. `request({ method: "CONNECT" })` now refuses and points
   at `connect()`.
+- **Tunnels are opt-in, and discoverable.** `HttpxServer`'s `tunnels: true`
+  advertises `urn:xmpp:http:connect:0` and lets CONNECT reach the handler;
+  without it CONNECT is answered 501 before the handler runs. `connect()`
+  refuses a peer whose disco lacks the feature (design §4.4). One wire form,
+  `<req method='CONNECT'>`, until the XSF answers; the API does not depend on
+  it.
+- **A streamed response without Content-Length is streamed.** The server
+  read the header with `Number()`, and `Number(null)` is 0: every length-less
+  stream counted as "0 bytes, fits inline", so the whole stream was buffered
+  before the reply — and a stream that never ends (a trickled download, an
+  event stream) never got one. `parseContentLength()` takes RFC 9110's
+  `1*DIGIT` (or a list of identical values) and nothing else, so `""`,
+  `"0x10"` and `"1e3"` no longer pass as lengths either. The bug had hidden
+  two sources that never gave a length: the static handler now sends a GET's
+  `Content-Length`, and the origin proxy only drops it when fetch actually
+  decompressed the body — otherwise every small page would now pay for an
+  IBB session. A length-less body with no stream mechanism open to the
+  requester is read up to the inline budget: inlined if it fits, 413 if not.
 - **Idle watchdogs are per stream.** `expectIncoming()` takes
   `idleTimeoutMs`, and a duplex defaults to `false`: no inbound idle timer and
   no stretched ack-withholding deadline, since a tunnel is idle by nature. The

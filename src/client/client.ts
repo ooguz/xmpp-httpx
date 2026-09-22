@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_BUFFERED_BYTES,
   HTTP_VERSION,
   NS_HTTPX,
+  NS_HTTPX_CONNECT,
 } from "../constants.js";
 import { DiscoCache } from "../discovery.js";
 import { CodecError, fromXmppError, HttpxError } from "../errors.js";
@@ -408,12 +409,17 @@ export class HttpxClient {
 
     const from = this.#options.from;
     if (this.#options.discover !== false) {
-      const support = await withAbort(this.#disco.supportsHttpx(to, from), signal);
-      if (support === "no") {
-        throw new HttpxError(
-          "not-implemented",
-          `${to} does not advertise ${NS_HTTPX}`,
-        );
+      // design §4.4: refuse up front rather than send a method the peer may
+      // reject as bad-request. One disco answer serves both questions; as
+      // everywhere, "unknown" (no usable disco) proceeds.
+      for (const feature of [NS_HTTPX, NS_HTTPX_CONNECT]) {
+        const support = await withAbort(this.#disco.supports(to, feature, from), signal);
+        if (support === "no") {
+          throw new HttpxError(
+            "not-implemented",
+            `${to} does not advertise ${feature}`,
+          );
+        }
       }
     }
 

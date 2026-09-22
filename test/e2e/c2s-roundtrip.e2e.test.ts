@@ -28,6 +28,7 @@ describe("c2s round-trips over a real Prosody", () => {
     server = new HttpxServer(bob.session, {
       authorize: allowAll(),
       preferredStreams: ["ibb", "chunkedBase64"],
+      tunnels: true,
       onError: (err) => console.error("[e2e] server error:", err),
     });
     server.handle(async (req) => {

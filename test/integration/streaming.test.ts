@@ -6,6 +6,7 @@ import { NS_HTTPX } from "../../src/constants.js";
 import { allowAll } from "../../src/server/policy.js";
 import {
   HttpxServer,
+  parseContentLength,
   type HttpxHandler,
   type HttpxServerOptions,
 } from "../../src/server/server.js";
@@ -165,6 +166,112 @@ describe("IBB streaming", () => {
       body: streamOf(body, 9000),
     });
     expect(resp.statusCode).toBe(204);
+  });
+});
+
+describe("streamed bodies without a Content-Length", () => {
+  // Number(null) is 0, so a length-less stream used to read as "0 bytes,
+  // fits inline": the server drained the whole stream before answering, and
+  // a stream that never ends never got an answer at all.
+  for (const form of ["handler object", "Response"] as const) {
+    it(`a never-ending stream is answered at once and flows (${form})`, async () => {
+      let pushed: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const endless = () =>
+        new ReadableStream<Uint8Array>({
+          start: (controller) => {
+            pushed = controller;
+            controller.enqueue(patternBytes(8192)); // two whole IBB blocks
+          },
+        });
+      const { client } = setup(() =>
+        form === "Response"
+          ? new Response(endless(), { status: 200 })
+          : { status: 200, body: endless() },
+      );
+      const resp = await client.request("server@example.org", { timeoutMs: 2_000 });
+      expect(resp.statusCode).toBe(200);
+      expect(resp.headers.has("content-length")).toBe(false);
+      const reader = resp.body!.getReader();
+      let got = 0;
+      while (got < 8192) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        got += value.length;
+      }
+      expect(got).toBe(8192);
+      pushed?.close();
+      await reader.cancel();
+    });
+  }
+
+  it("a small length-less stream is still delivered whole", async () => {
+    const body = patternBytes(1000);
+    const { client } = setup(() => ({ status: 200, body: streamOf(body, 100) }));
+    const resp = await client.request("server@example.org");
+    expect(await bytesFromStream(resp.body!)).toEqual(body);
+  });
+
+  it("with no stream mechanism in common, a small length-less body still goes inline", async () => {
+    // Streaming it is impossible here, so the only way to send it is to find
+    // out it fits: read up to the budget, no further.
+    const { client } = setup(
+      () => ({ status: 200, headers: { "content-type": "text/plain" }, body: streamOf(new TextEncoder().encode("hello"), 2) }),
+      { preferredStreams: ["jingle"] },
+      { accept: { jingle: false } },
+    );
+    const resp = await client.request("server@example.org");
+    expect(resp.statusCode).toBe(200);
+    expect(await resp.text()).toBe("hello");
+  });
+
+  it("with no stream mechanism in common, a large length-less body is 413, promptly", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull: (controller) => {
+        pulls++;
+        controller.enqueue(patternBytes(1024));
+      },
+      cancel: () => {
+        cancelled = true;
+      },
+    });
+    const { client } = setup(
+      () => ({ status: 200, body: endless }),
+      { preferredStreams: ["jingle"] },
+      { accept: { jingle: false } },
+    );
+    const resp = await client.request("server@example.org", { timeoutMs: 2_000 });
+    expect(resp.statusCode).toBe(413);
+    // Read up to the budget and stopped: not drained, not held open.
+    expect(pulls).toBeLessThan(20);
+    expect(cancelled).toBe(true);
+  });
+
+  it("a declared length that fits is still inlined", async () => {
+    const body = patternBytes(1000);
+    const { client } = setup(() => ({
+      status: 200,
+      headers: { "content-length": "1000" },
+      body: streamOf(body, 100),
+    }));
+    const resp = await client.request("server@example.org");
+    expect(await bytesFromStream(resp.body!)).toEqual(body);
+  });
+});
+
+describe("parseContentLength", () => {
+  it("accepts 1*DIGIT and a list of identical values (RFC 9110 §8.6)", () => {
+    expect(parseContentLength("0")).toBe(0);
+    expect(parseContentLength("1234")).toBe(1234);
+    expect(parseContentLength(" 42 ")).toBe(42);
+    expect(parseContentLength("5, 5")).toBe(5);
+  });
+
+  it("gives no length for anything Number() would have guessed at", () => {
+    for (const bad of [null, "", " ", "0x10", "1e3", "-1", "1.5", "12abc", "5, 6", "99999999999999999999"]) {
+      expect(parseContentLength(bad), String(bad)).toBeUndefined();
+    }
   });
 });
 

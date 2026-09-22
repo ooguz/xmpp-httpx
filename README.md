@@ -111,6 +111,52 @@ server.handle(createOriginProxyHandler("http://localhost:8080"));
 server.start();
 ```
 
+### Tunnels (CONNECT)
+
+A CONNECT answered with a tunnel carries bytes both ways over one IBB session. This is a deliberate extension to XEP-0332 v0.5.1, which excludes CONNECT; see [protocol-notes.md](docs/protocol-notes.md#duplex-streams-connect-tunnels). The library never dials anything. The handler connects to the destination and hands back the pipe:
+
+```js
+import net from "node:net";
+import { once } from "node:events";
+import { pipeline } from "node:stream/promises";
+
+const exit = new HttpxServer(xmpp, { authorize: allowList(["alice@example.org"]), tunnels: true });
+exit.handle(async (req) => {
+  if (req.method !== "CONNECT") return { status: 405 };
+  const colon = req.resource.lastIndexOf(":"); // authority-form: host:port, IPv6 in brackets
+  const host = req.resource.slice(0, colon).replace(/^\[(.*)\]$/, "$1");
+  const socket = net.connect(Number(req.resource.slice(colon + 1)), host);
+  try {
+    await once(socket, "connect");
+  } catch {
+    return { status: 502 };
+  }
+  return {
+    status: 200,
+    tunnel: async (tunnel) => {
+      // The destination may have hung up while the <open> was on its way.
+      if (socket.destroyed) return tunnel.close().catch(() => {});
+      socket.on("close", () => void tunnel.close().catch(() => {}));
+      socket.on("data", (chunk) => {
+        socket.pause(); // write() resolves when the window has room
+        tunnel.write(chunk).then(() => socket.resume(), () => socket.destroy());
+      });
+      try {
+        await pipeline(tunnel.readable, socket); // waits for 'drain' the other way
+      } finally {
+        socket.destroy();
+      }
+    },
+  };
+});
+exit.start();
+
+// The other end:
+const { response, tunnel } = await httpx.connect("exit@example.org", { authority: "example.org:443" });
+```
+
+`tunnels: true` advertises `urn:xmpp:http:connect:0`. Without it, CONNECT is answered 501 and never reaches the handler. `connect()` refuses a peer whose disco lacks the feature. There is no half-close: `close()` on either side ends both directions. A tunnel has no idle watchdog, so noticing a peer that has vanished is up to the application.
+
 ## Gateway CLI
 
 Put an existing website on XMPP without writing any code:
