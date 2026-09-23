@@ -110,6 +110,8 @@ export interface HttpxConnectInit {
   timeoutMs?: number;
   /** Aborts establishment. Once connect() resolves the tunnel is yours. */
   signal?: AbortSignal;
+  /** Elements in other namespaces to carry inside the <req/>, verbatim. */
+  extensions?: Element[];
 }
 
 export interface HttpxConnectResult {
@@ -344,6 +346,7 @@ export class HttpxClient {
         ? { maxChunkSize: this.#options.maxChunkSize }
         : {}),
       ...(data !== undefined ? { data } : {}),
+      ...(init.extensions && init.extensions.length > 0 ? { extensions: init.extensions } : {}),
     };
 
     const iqAttrs: Record<string, string> =
@@ -396,6 +399,7 @@ export class HttpxClient {
       version: resp.version,
       headers: resp.headers,
       body,
+      ...(resp.extensions ? { extensions: resp.extensions } : {}),
     });
   }
 
@@ -445,6 +449,7 @@ export class HttpxClient {
       ...(this.#options.maxChunkSize !== undefined
         ? { maxChunkSize: this.#options.maxChunkSize }
         : {}),
+      ...(init.extensions && init.extensions.length > 0 ? { extensions: init.extensions } : {}),
     };
     const iqAttrs: Record<string, string> =
       from !== undefined ? { type: "set", to, from } : { type: "set", to };
@@ -476,6 +481,7 @@ export class HttpxClient {
         version: resp.version,
         headers: resp.headers,
         body,
+        ...(resp.extensions ? { extensions: resp.extensions } : {}),
       });
 
     if (resp.statusCode < 200 || resp.statusCode > 299) {

@@ -75,6 +75,8 @@ export interface HttpxServerRequest {
   body: ReadableStream<Uint8Array> | null;
   /** What the requester accepts for the response body. */
   accept: StreamAcceptFlags;
+  /** Children of the <req/> in other namespaces, verbatim; empty when none. */
+  extensions: Element[];
 }
 
 export interface HttpxHandlerResponse {
@@ -83,6 +85,8 @@ export interface HttpxHandlerResponse {
   statusMessage?: string;
   headers?: HeadersInit;
   body?: HttpxBodyInit;
+  /** Elements in other namespaces to carry inside the <resp/>, verbatim. */
+  extensions?: Element[];
   /**
    * CONNECT only: turns a 2xx answer into a tunnel (design §4.2). The
    * response carries no body; instead one IBB stream, opened by this server
@@ -203,6 +207,8 @@ interface NormalizedResponse {
   headers: Headers;
   source: BodySource;
   stream?: ReadableStream<Uint8Array>;
+  /** Handler-supplied children in other namespaces, for the <resp/>. */
+  extensions?: Element[];
 }
 
 export class HttpxServer {
@@ -356,6 +362,7 @@ export class HttpxServer {
       url: resourceToUrl(to, req.resource),
       headers: req.headers,
       body,
+      extensions: req.extensions ?? [],
       accept: {
         ibb: req.accept.ibb,
         chunked: true,
@@ -448,6 +455,7 @@ export class HttpxServer {
       url: resourceToUrl(to, req.resource),
       headers: req.headers,
       body: null,
+      extensions: req.extensions ?? [],
       accept: {
         ibb: true,
         chunked: true,
@@ -524,6 +532,9 @@ export class HttpxServer {
         (status === 200 ? "Connection Established" : DEFAULT_STATUS_MESSAGES[status] ?? String(status)),
       headers,
       data: { kind: "ibb", sid },
+      ...(handlerResult.extensions && handlerResult.extensions.length > 0
+        ? { extensions: handlerResult.extensions }
+        : {}),
     };
     this.#scheduleTunnel(from, to, sid, blockSize, tunnel, req.resource);
     return encodeResp(resp);
@@ -605,6 +616,7 @@ export class HttpxServer {
     let headers: Headers;
     let source: BodySource;
     let stream: ReadableStream<Uint8Array> | undefined;
+    let extensions: Element[] | undefined;
 
     if (result instanceof Response) {
       status = result.status;
@@ -619,6 +631,7 @@ export class HttpxServer {
       status = result.status ?? 200;
       statusMessage = result.statusMessage;
       headers = new Headers(result.headers);
+      extensions = result.extensions;
       const body = result.body;
       if (body === undefined) {
         source = { kind: "empty" };
@@ -644,6 +657,7 @@ export class HttpxServer {
       headers,
       source,
       ...(stream !== undefined ? { stream } : {}),
+      ...(extensions !== undefined && extensions.length > 0 ? { extensions } : {}),
     };
   }
 
@@ -777,6 +791,7 @@ export class HttpxServer {
       statusCode: normalized.status,
       statusMessage: normalized.statusMessage,
       headers: normalized.headers,
+      ...(normalized.extensions !== undefined ? { extensions: normalized.extensions } : {}),
     };
 
     if (normalized.source.kind !== "empty" && streamContext) {

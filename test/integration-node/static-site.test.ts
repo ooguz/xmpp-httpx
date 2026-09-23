@@ -24,6 +24,7 @@ function request(
     url: `httpx://web.example.org${resource}`,
     headers: new Headers(init.headers ?? {}),
     body: null,
+    extensions: [],
     accept: { ibb: true, chunked: true, sipub: false, jingle: false },
   };
 }

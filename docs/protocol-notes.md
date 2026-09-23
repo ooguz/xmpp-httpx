@@ -343,6 +343,18 @@ implementation has to agree with:
   `Upgrade`, …) are stripped by the origin proxy per XEP-0332 §9, since XMPP
   has no persistent-connection semantics to manage.
 
+## Extension elements
+
+- A `<req>` or `<resp>` may carry children in other namespaces; the codec
+  hands them through verbatim (`extensions` on the request init, the server
+  request, the handler response and the client response) and never reads
+  them. Only children outside `urn:xmpp:http` and outside the SHIM `headers`
+  count; an unknown child in the protocol's own namespace is ignored as
+  before, so a future XEP-0332 element cannot be mistaken for an
+  application's. XEP-0332 v0.5.1 is silent on foreign children; XMPP's usual
+  rule (ignore what you do not understand) makes carrying them harmless to
+  a peer that has never heard of them.
+
 ## Discovery
 
 - `HttpxClient` disco-checks a peer before the first request (cached per

@@ -104,6 +104,42 @@ describe("codec round-trips", () => {
     expect(reparsed.data).toEqual({ kind: "text", text: '{"a":1}' });
   });
 
+  it("carries children in other namespaces through both stanzas, and only those", () => {
+    const sealed = xml("sealed", { xmlns: "urn:example:seal", v: "0" }, "Y2lwaGVydGV4dA==");
+    const req: ReqStanza = {
+      method: "GET",
+      resource: "/",
+      version: "1.1",
+      accept: { sipub: true, ibb: true, jingle: true },
+      headers: new Headers({ host: "example.org" }),
+      extensions: [sealed],
+    };
+    const reReq = decodeReq(parse(encodeReq(req).toString()));
+    expect(reReq.extensions?.map((e) => `${e.getName()}|${e.getNS()}|${e.attrs["v"]}|${e.getText()}`)).toEqual([
+      "sealed|urn:example:seal|0|Y2lwaGVydGV4dA==",
+    ]);
+    // Headers and data stay where they were: not extensions.
+    expect(reReq.headers.get("host")).toBe("example.org");
+
+    const resp: RespStanza = {
+      version: "1.1",
+      statusCode: 200,
+      headers: new Headers(),
+      data: { kind: "text", text: "body" },
+      extensions: [xml("sealed", { xmlns: "urn:example:seal" }, "cmVzcA==")],
+    };
+    const reResp = decodeResp(parse(encodeResp(resp).toString()));
+    expect(reResp.extensions?.map((e) => e.getText())).toEqual(["cmVzcA=="]);
+    expect(reResp.data).toEqual({ kind: "text", text: "body" });
+  });
+
+  it("does not take an unknown child in the protocol's own namespace for an extension", () => {
+    const el = parse(
+      `<req xmlns='${NS_HTTPX}' method='GET' resource='/' version='1.1'><future/></req>`,
+    );
+    expect(decodeReq(el).extensions).toBeUndefined();
+  });
+
   it("round-trips a response with base64 data", () => {
     const bytes = new Uint8Array([0, 1, 2, 250, 251, 252]);
     const original: RespStanza = {

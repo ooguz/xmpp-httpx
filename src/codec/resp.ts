@@ -2,6 +2,7 @@ import xml, { Element } from "@xmpp/xml";
 import { NS_HTTPX } from "../constants.js";
 import { CodecError } from "../errors.js";
 import { decodeData, encodeData, type DataDescriptor } from "./data.js";
+import { extensionChildren } from "./extensions.js";
 import { decodeHeaders, encodeHeaders } from "./headers.js";
 
 export interface RespStanza {
@@ -10,6 +11,8 @@ export interface RespStanza {
   statusMessage?: string;
   headers: Headers;
   data?: DataDescriptor;
+  /** Children in other namespaces, carried verbatim (see codec/extensions.ts). */
+  extensions?: Element[];
 }
 
 export function encodeResp(resp: RespStanza): Element {
@@ -26,6 +29,7 @@ export function encodeResp(resp: RespStanza): Element {
   const headers = encodeHeaders(resp.headers);
   if (headers) el.append(headers);
   if (resp.data) el.append(encodeData(resp.data));
+  for (const extension of resp.extensions ?? []) el.append(extension);
   return el;
 }
 
@@ -53,5 +57,7 @@ export function decodeResp(el: Element): RespStanza {
 
   const data = decodeData(el);
   if (data) resp.data = data;
+  const extensions = extensionChildren(el);
+  if (extensions.length > 0) resp.extensions = extensions;
   return resp;
 }

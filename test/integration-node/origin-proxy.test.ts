@@ -26,6 +26,7 @@ function request(
     url: resource,
     headers: new Headers(),
     body: null,
+    extensions: [],
     accept: { ibb: true, chunked: true, sipub: false, jingle: false },
   };
 }

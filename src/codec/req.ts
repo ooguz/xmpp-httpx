@@ -9,6 +9,7 @@ import { CodecError } from "../errors.js";
 import { isHttpMethod, type HttpMethod, type StreamAccept } from "../types.js";
 import { resourceForm } from "../urls.js";
 import { decodeData, encodeData, type DataDescriptor } from "./data.js";
+import { extensionChildren } from "./extensions.js";
 import { decodeHeaders, encodeHeaders } from "./headers.js";
 
 export interface ReqStanza {
@@ -27,6 +28,8 @@ export interface ReqStanza {
   accept: StreamAccept;
   headers: Headers;
   data?: DataDescriptor;
+  /** Children in other namespaces, carried verbatim (see codec/extensions.ts). */
+  extensions?: Element[];
 }
 
 function clampChunkSize(value: number): number {
@@ -52,6 +55,7 @@ export function encodeReq(req: ReqStanza): Element {
   const headers = encodeHeaders(req.headers);
   if (headers) el.append(headers);
   if (req.data) el.append(encodeData(req.data));
+  for (const extension of req.extensions ?? []) el.append(extension);
   return el;
 }
 
@@ -116,5 +120,7 @@ export function decodeReq(el: Element): ReqStanza {
 
   const data = decodeData(el);
   if (data) req.data = data;
+  const extensions = extensionChildren(el);
+  if (extensions.length > 0) req.extensions = extensions;
   return req;
 }

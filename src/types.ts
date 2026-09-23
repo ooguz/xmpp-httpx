@@ -58,4 +58,10 @@ export interface HttpxRequestInit {
    */
   idleTimeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Elements in other namespaces to carry inside the <req/>, verbatim: each
+   * must bring its own xmlns. The responder sees them as
+   * `HttpxServerRequest.extensions`.
+   */
+  extensions?: Element[];
 }

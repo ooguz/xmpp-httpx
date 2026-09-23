@@ -38,6 +38,59 @@ function setup(
   return { client, server, clientSession, serverSession };
 }
 
+describe("extension elements", () => {
+  const NS_X = "urn:example:seal";
+
+  it("travel verbatim in both directions on request()", async () => {
+    let seen: string[] | undefined;
+    const { client } = setup((req) => {
+      seen = req.extensions.map((e) => `${e.getName()}|${e.getNS()}|${e.getText()}`);
+      return {
+        status: 200,
+        body: "ok",
+        extensions: [xml("sealed", { xmlns: NS_X, dir: "resp" }, "cmVzcA==")],
+      };
+    });
+    const resp = await client.request("server@example.org", {
+      resource: "/",
+      extensions: [xml("sealed", { xmlns: NS_X, dir: "req" }, "cmVx")],
+    });
+    expect(seen).toEqual([`sealed|${NS_X}|cmVx`]);
+    expect(resp.extensions.map((e) => `${e.attrs["dir"]}|${e.getText()}`)).toEqual(["resp|cmVzcA=="]);
+    expect(await resp.text()).toBe("ok");
+  });
+
+  it("travel on connect() too, on the refusal path", async () => {
+    let seen: string[] | undefined;
+    const { client } = setup(
+      (req) => {
+        seen = req.extensions.map((e) => e.getText());
+        return { status: 403, extensions: [xml("sealed", { xmlns: NS_X }, "bm8=")] };
+      },
+      { tunnels: true },
+    );
+    const { response, tunnel } = await client.connect("server@example.org", {
+      authority: "example.org:443",
+      extensions: [xml("sealed", { xmlns: NS_X }, "Y29ubmVjdA==")],
+    });
+    expect(tunnel).toBeNull();
+    expect(seen).toEqual(["Y29ubmVjdA=="]);
+    expect(response.statusCode).toBe(403);
+    expect(response.extensions.map((e) => e.getText())).toEqual(["bm8="]);
+  });
+
+  it("are empty, not absent, when none were sent", async () => {
+    let count = -1;
+    const { client } = setup((req) => {
+      count = req.extensions.length;
+      return { status: 200, body: "" };
+    });
+    const resp = await client.request("server@example.org", { resource: "/" });
+    expect(count).toBe(0);
+    expect(resp.extensions).toEqual([]);
+  });
+});
+
 describe("inline round-trips", () => {
   it("GET with an inline text response", async () => {
     let seen: { method: string; resource: string; host: string | null } | undefined;

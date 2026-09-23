@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Extension elements on `<req/>` and `<resp/>`.** Children in a namespace
+  other than `urn:xmpp:http` and SHIM headers ride along verbatim:
+  `HttpxRequestInit.extensions` / `HttpxConnectInit.extensions` on the way
+  out, `HttpxServerRequest.extensions` at the handler, and
+  `HttpxHandlerResponse.extensions` back to `HttpxResponse.extensions`. The
+  codec never interprets them; each must bring its own `xmlns`. An unknown
+  child in the protocol's own namespace is still ignored, not an extension.
+  n146's sealed envelope (hiding a request's target from the XMPP servers) is
+  the first user.
 - **IBB receivers tolerate redelivered blocks.** After an XEP-0198 stream
   resumption the server replays every stanza it had not acknowledged, so the
   same `<data/>` can legitimately arrive twice. A block whose `seq` is up to

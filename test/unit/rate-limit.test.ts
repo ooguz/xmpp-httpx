@@ -11,6 +11,7 @@ function request(from: string, resource = "/"): HttpxServerRequest {
     url: `httpx://web.example.org${resource}`,
     headers: new Headers(),
     body: null,
+    extensions: [],
     accept: { ibb: true, chunked: true, sipub: false, jingle: false },
   };
 }

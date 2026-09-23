@@ -16,6 +16,8 @@ export class HttpxResponse {
   readonly version: string;
   readonly headers: Headers;
   readonly body: ReadableStream<Uint8Array> | null;
+  /** Children of the <resp/> in other namespaces, verbatim; empty when none. */
+  readonly extensions: Element[];
 
   constructor(init: {
     statusCode: number;
@@ -23,12 +25,14 @@ export class HttpxResponse {
     version: string;
     headers: Headers;
     body: ReadableStream<Uint8Array> | null;
+    extensions?: Element[];
   }) {
     this.statusCode = init.statusCode;
     this.statusMessage = init.statusMessage ?? "";
     this.version = init.version;
     this.headers = init.headers;
     this.body = init.body;
+    this.extensions = init.extensions ?? [];
   }
 
   get ok(): boolean {
