@@ -116,6 +116,22 @@ export interface DuplexOptions {
   idleTimeoutMs?: IbbIdleTimeout;
 }
 
+/**
+ * How far behind `expectedSeq` a block may be and still count as a copy of
+ * one already taken, rather than a corrupt sender. XEP-0198 resumption
+ * replays every stanza the server had not acknowledged, so after a network
+ * drop the same <data/> can arrive twice — legitimately. A sender never has
+ * more than its window in flight (16 by default, budget-capped), so anything
+ * within this many is a redelivery; a genuine sequence error is a gap ahead,
+ * or a jump far behind, and both still fail the stream.
+ */
+const REDELIVERY_WINDOW = 64;
+
+function isRedelivery(seq: number, expectedSeq: number): boolean {
+  const behind = (expectedSeq - seq + 65536) % 65536;
+  return behind > 0 && behind <= REDELIVERY_WINDOW;
+}
+
 interface InStreamState {
   controller: ReadableStreamDefaultController<Uint8Array>;
   expectedSeq: number;
@@ -1218,6 +1234,10 @@ export class IbbManager {
     }
 
     const seq = Number(ctx.element.attrs["seq"]);
+    if (Number.isInteger(seq) && isRedelivery(seq, state.expectedSeq)) {
+      // Already taken: acknowledge and drop, do not advance (see isRedelivery).
+      return true;
+    }
     if (!Number.isInteger(seq) || seq !== state.expectedSeq) {
       this.#finishInStream(
         key,
@@ -1312,6 +1332,8 @@ export class IbbManager {
     if (!state || state.finished) return;
 
     const seq = Number(data.attrs["seq"]);
+    // A redelivered block (XEP-0198 replay) is dropped, not a failure.
+    if (Number.isInteger(seq) && isRedelivery(seq, state.expectedSeq)) return;
     if (!Number.isInteger(seq) || seq !== state.expectedSeq) {
       this.#finishInStream(
         key,

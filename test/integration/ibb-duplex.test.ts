@@ -617,6 +617,8 @@ interface Foreign {
   closeFromPeer(): Promise<void>;
   /** How the peer answers the opener's <close/>. */
   onOpenerClose: () => Promise<Element | boolean> | Element | boolean;
+  /** Send one <data/> to the opener; "ok" for a result, else the error condition. */
+  sendData(seq: number, bytes: Uint8Array): Promise<string>;
 }
 
 function foreignPeer(): Foreign {
@@ -648,6 +650,21 @@ function foreignPeer(): Foreign {
       );
     },
     onOpenerClose: () => true,
+    sendData: async (seq, bytes) => {
+      try {
+        await b.iqCaller.request(
+          xml(
+            "iq",
+            { type: "set", to: OPENER },
+            xml("data", { xmlns: NS_IBB, sid: "t", seq: String(seq) }, Buffer.from(bytes).toString("base64")),
+          ),
+        );
+        return "ok";
+      } catch (err) {
+        const condition = (err as { condition?: string }).condition;
+        return condition ?? (err instanceof Error ? err.message : String(err));
+      }
+    },
   };
   b.iqCallee.set(NS_IBB, "open", () => true);
   b.iqCallee.set(NS_IBB, "close", () => peer.onOpenerClose());
@@ -697,6 +714,57 @@ describe("duplex IBB against a peer that is not this library", () => {
     // And the in-flight blocks it refused as unknown, having closed, are the
     // ordinary cost of the tunnel ending — not a failure close() reports.
     await within(a.close(), 1_000, "close()");
+  });
+
+  it("acknowledges and drops a block delivered twice (XEP-0198 replay); a real gap still fails", async () => {
+    const peer = foreignPeer();
+    const a = await peer.opener.openDuplex(ACCEPTOR, { sid: "t", blockSize: 512 });
+    const received: Uint8Array[] = [];
+    const reading = (async () => {
+      const reader = a.readable.getReader();
+      for (;;) {
+        const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }));
+        if (done) return;
+        received.push(value!);
+      }
+    })();
+    const text = () => Buffer.from(concatBytes(received)).toString();
+    const bytes = (s: string) => new TextEncoder().encode(s);
+
+    expect(await peer.sendData(0, bytes("AAA"))).toBe("ok");
+    expect(await peer.sendData(1, bytes("BBB"))).toBe("ok");
+    // The server replayed what it had not acknowledged: the same blocks again.
+    expect(await peer.sendData(0, bytes("AAA"))).toBe("ok");
+    expect(await peer.sendData(1, bytes("BBB"))).toBe("ok");
+    await settle();
+    expect(text()).toBe("AAABBB"); // taken once
+    // The stream is intact and continues where it was.
+    expect(await peer.sendData(2, bytes("CCC"))).toBe("ok");
+    await settle();
+    expect(text()).toBe("AAABBBCCC");
+    // Far behind is not a replay any sender could produce: a real error.
+    expect(await peer.sendData((3 - 100 + 65536) % 65536, bytes("x"))).toBe("unexpected-request");
+    await within(reading, 1_000, "reader");
+    expect(text()).toBe("AAABBBCCC");
+  });
+
+  it("a gap ahead still fails the stream", async () => {
+    const peer = foreignPeer();
+    const a = await peer.opener.openDuplex(ACCEPTOR, { sid: "t", blockSize: 512 });
+    const reader = a.readable.getReader();
+    expect(await peer.sendData(0, new Uint8Array([1]))).toBe("ok");
+    expect(await peer.sendData(2, new Uint8Array([3]))).toBe("unexpected-request");
+    const outcome = await within(
+      (async () => {
+        for (;;) {
+          const { done } = await reader.read();
+          if (done) return "ended";
+        }
+      })().catch((e: unknown) => e),
+      1_000,
+      "reader",
+    );
+    expect(outcome).toBeInstanceOf(HttpxError);
   });
 
   it("a peer <close/> ends a close() that is already waiting for acks", async () => {

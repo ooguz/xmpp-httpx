@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **IBB receivers tolerate redelivered blocks.** After an XEP-0198 stream
+  resumption the server replays every stanza it had not acknowledged, so the
+  same `<data/>` can legitimately arrive twice. A block whose `seq` is up to
+  64 behind the one expected is now acknowledged and dropped (or, on the
+  message-carried path, dropped) instead of failing the stream with "seq
+  mismatch". A gap ahead, or a jump further behind, still fails it: a
+  sender's window is far smaller than 64, so those cannot be replays. Found
+  by n146's resumption test: a tunnel survived the reconnect only to die on
+  the replay.
 - **`xmpp-httpx/metrics` entry point.** The gateway's Prometheus registry
   (`Metrics`) and its `/metrics` + `/healthz` listener (`startMetricsServer`)
   are now importable by applications that run their own `HttpxServer` — an
