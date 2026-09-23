@@ -35,7 +35,10 @@ implementations to revive its standards process; be that implementation.
 - [x] **XSF / standards feedback** (M): the implementation-experience report
   is drafted and ready to post to standards@xmpp.org. It is kept in the
   owner's checkout only (`docs/xep-0332-feedback.md`, gitignored) until it is
-  sent.
+  sent. A second part (`docs/xep-0332-feedback-2.md`, likewise gitignored,
+  2026-09-23) covers CONNECT tunnels and request-target forms, proposes the
+  revision item by item, and makes the co-authorship offer; the fallback is
+  a companion "HTTP CONNECT over XMPP" ProtoXEP.
 - [x] **Interop matrix page** (S): [interop.md](interop.md).
 
 Acceptance: package installable from npm; docs site live; feedback thread

@@ -9,3 +9,4 @@ docs/api/
 **/__screenshots__/
 # The XSF implementation-experience draft stays local until it is sent.
 docs/xep-0332-feedback.md
+docs/xep-0332-feedback-2.md

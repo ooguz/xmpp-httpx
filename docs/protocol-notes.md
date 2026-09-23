@@ -26,9 +26,12 @@ rather than an accident.
   have: its `method` enumeration stops at `PATCH`, mirroring RFC 2616 minus
   `CONNECT`. A tunnel cannot be asked for without it, and a private method
   name would be a larger deviation than the name HTTP already uses. A peer
-  that does not implement it answers `501`, which is the behaviour the XEP
-  prescribes for a method it does not support — so the deviation costs
-  nothing on the wire against an implementation that has never heard of it.
+  that does not implement it answers `501`, which is what RFC 9110 §15.6.2
+  prescribes for a method a server does not implement; XEP-0332 itself is
+  silent on unsupported methods (a schema-validating peer would answer an IQ
+  `bad-request` instead). Either way the deviation costs nothing on the wire
+  against an implementation that has never heard of it, and `connect()` does
+  not send it to a peer whose disco lacks the feature in the first place.
 - `resource` accepts all four RFC 9112 §3.2 request-target forms, not only
   the origin-form (`/index.html?x=1`) the XEP shows: `*` as before,
   authority-form (`example.org:443`) and absolute-form
