@@ -6,8 +6,6 @@
 
 TypeScript implementation of [XEP-0332: HTTP over XMPP Transport](https://xmpp.org/extensions/xep-0332.html). It tunnels HTTP requests and responses through XMPP, for Node.js and browsers.
 
-*[Türkçe belge: README.tr.md](README.tr.md)*
-
 XEP-0332 is a **Deferred** XEP (v0.5.1). This library is an exploratory implementation of the kind the XEP explicitly encourages, built as the foundation for a browser that navigates `httpx://user@domain/path` URLs.
 
 Documentation:
@@ -37,7 +35,7 @@ Documentation:
 - A ready-made gateway CLI (`xmpp-httpx-gateway`) with a Docker image
 - A published test harness (`xmpp-httpx/testing`) so downstream code can be tested without an XMPP server
 
-## Install
+## Install (NOT PUBLISHED ON NPM YET)
 
 ```sh
 npm install xmpp-httpx @xmpp/client
