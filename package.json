@@ -43,6 +43,10 @@
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
     },
+    "./metrics": {
+      "types": "./dist/metrics/index.d.ts",
+      "default": "./dist/metrics/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"

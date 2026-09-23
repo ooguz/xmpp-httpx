@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`xmpp-httpx/metrics` entry point.** The gateway's Prometheus registry
+  (`Metrics`) and its `/metrics` + `/healthz` listener (`startMetricsServer`)
+  are now importable by applications that run their own `HttpxServer` — an
+  exit, a bridge — so they get the same counters, histogram and liveness
+  probe without a client library. Nothing moved; the two modules were always
+  free of gateway-specific dependencies and only lived under `cli/` because
+  the gateway was their first user.
 - **Fair IBB scheduling across streams.** Every sending IBB stream on a
   session now also draws from one shared budget of blocks in flight
   (`ibbSessionWindow`, default 16, on `HttpxClient` and `HttpxServer`), and
