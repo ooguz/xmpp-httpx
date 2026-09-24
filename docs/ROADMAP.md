@@ -36,9 +36,13 @@ implementations to revive its standards process; be that implementation.
   is drafted and ready to post to standards@xmpp.org. It is kept in the
   owner's checkout only (`docs/xep-0332-feedback.md`, gitignored) until it is
   sent. A second part (`docs/xep-0332-feedback-2.md`, likewise gitignored,
-  2026-09-23) covers CONNECT tunnels and request-target forms, proposes the
-  revision item by item, and makes the co-authorship offer; the fallback is
-  a companion "HTTP CONNECT over XMPP" ProtoXEP.
+  2026-09-23, extended 2026-09-24) covers CONNECT tunnels and request-target
+  forms, proposes the revision item by item (12 items plus a companion), and
+  makes the co-authorship offer; the fallback is a "HTTP CONNECT over XMPP"
+  ProtoXEP. The 2026-09-24 additions, all found while building n146: IBB
+  receivers must tolerate an XEP-0198-resumed stream's replayed blocks (11);
+  `<req>`/`<resp>` foreign-namespace children (12); the sealed end-to-end
+  envelope as a companion ProtoXEP (13).
 - [x] **Interop matrix page** (S): [interop.md](interop.md).
 
 Acceptance: package installable from npm; docs site live; feedback thread
