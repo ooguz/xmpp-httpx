@@ -90,8 +90,12 @@ by default, or followed at the gateway with `--follow-redirects`.
 ## Tuning
 
 - `--max-stanza <bytes>` derives inline and chunk budgets from your server's
-  stanza limit via `stanzaBudgets()`. Worth setting: the default budgets are
-  conservative because the limit is not discoverable from the client side.
+  stanza limit via `stanzaBudgets()`. Without it, a server that advertises
+  its limit (XEP-0478 stream limits; Prosody's `mod_limits`, ejabberd) is
+  read at connection time and the budgets follow it, logged as
+  `stream limit N bytes advertised`; on a server that announces nothing the
+  defaults stay conservative (the RFC 6120 10 KiB floor). A component
+  stream has no features, so set it by hand there.
 - `--prefer ibb,chunkedBase64` sets the stream mechanism preference for large
   bodies.
 - `--max-body <bytes>` caps request bodies (default 8 MiB).

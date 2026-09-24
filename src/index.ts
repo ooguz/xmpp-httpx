@@ -70,6 +70,17 @@ export {
   type StreamMechanism,
 } from "./transport/select.js";
 export {
+  applyStreamLimits,
+  parseStreamLimits,
+  STREAM_LIMITS_NS,
+  watchStreamLimits,
+  type NonzaSource,
+  type StanzaBudgets,
+  type StanzaBudgetTarget,
+  type StreamLimits,
+  type StreamLimitsWatch,
+} from "./transport/limits.js";
+export {
   TransportRegistry,
   type BodyOffer,
   type BodyTransport,

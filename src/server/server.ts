@@ -222,7 +222,21 @@ export class HttpxServer {
 
   constructor(session: XmppSession, options: HttpxServerOptions = {}) {
     this.#session = session;
-    this.#options = options;
+    // Our own copy: setStanzaBudgets() adjusts it later without touching the
+    // caller's object.
+    this.#options = { ...options };
+  }
+
+  /**
+   * Re-derives the sizes the stream's stanza limit bounds — inline response
+   * bodies and the ceiling on this server's own IBB blocks — typically from
+   * `stanzaBudgets(maxBytes)` once the server we are connected to has
+   * advertised its limit (XEP-0478; see `applyStreamLimits`). Responses
+   * already being sent keep the sizes they started with.
+   */
+  setStanzaBudgets(budgets: { inlineBudgetBytes: number; maxChunkSize: number }): void {
+    this.#options.inlineBudgetBytes = budgets.inlineBudgetBytes;
+    this.#options.ibbBlockSize = budgets.maxChunkSize;
   }
 
   handle(handler: HttpxHandler): this {

@@ -430,21 +430,26 @@ on the other end.
   `idleTimeoutMs` now reach an IBB body's own watchdog too.
 - [x] **Absolute-form discovery** (S, 2026-09-22): `urn:xmpp:http#absolute-form`
   advertised; `DiscoCache.supports(jid, feature)`.
-- [ ] **XEP-0198 resumption** (M): stream management with resumption keeps
-  long-lived streams alive across a brief network loss. Also bounds the
-  retained outbound queue, which a saturated windowed sender grows (see
-  [architecture.md](architecture.md#throughput)).
-- [ ] **XEP-0478 stream limits** (S): nothing in the `@xmpp` stack parses the
-  `<limits/>` stream feature, so `stanzaBudgets()` is fed by hand today. It
-  arrives before resource binding, so reading it means a nonza listener
-  installed before `entity.start()` resolves.
+- [x] **XEP-0198 resumption** (M, 2026-09-23): xmpp.js already negotiates
+  stream management with resumption; what the library had to do was survive
+  the replay — resumption is at-least-once, and XEP-0047's strict `seq`
+  treated a replayed block as a corrupt stream. A block up to 64 behind the
+  expected `seq` is now acknowledged and dropped (a gap ahead still fails);
+  the n146 daemon proves it end to end through a severed TCP relay. The
+  retained-queue bound is xmpp.js's.
+- [x] **XEP-0478 stream limits** (S, 2026-09-24): `parseStreamLimits`,
+  `watchStreamLimits` (a nonza listener to install before `entity.start()`,
+  since the features carrying the limit precede binding) and
+  `applyStreamLimits(entity, clientOrServer)`, which re-runs
+  `stanzaBudgets()` into the new `setStanzaBudgets()` on every announcement
+  — the limit may change after authentication and on every reconnect. The
+  gateway CLI applies it unless `--max-stanza` was given.
 
 ## Cross-cutting quick wins (any time)
 
-- [ ] **CI action versions** (S): every job in `.github/workflows/ci.yml` pins
-  `actions/checkout@v4` and `actions/setup-node@v4`, which target Node 20;
-  GitHub already forces them onto Node 24 and warns on every run. Bump both to
-  `@v5` (and `upload-pages-artifact`/`deploy-pages` while there). Separately,
+- [~] **CI action versions** (S): `actions/checkout` and `actions/setup-node`
+  are on `@v5` (2026-09-24). `upload-pages-artifact@v3` / `deploy-pages@v4`
+  are left as they are until their next majors are verified. Separately,
   `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19 — worth one run on
   `ubuntu-26.04` before the label moves, since the e2e job brings up Docker.
 - [x] `HttpxResponse.formData()`, which delegates to the platform's parser, so

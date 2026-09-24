@@ -522,9 +522,12 @@ connection loss follows from the session abstraction:
   old ones to release listeners.
 - Budgets can be adapted to a server's real stanza-size limit (the 10 KiB
   default is only the RFC 6120 floor): spread
-  `stanzaBudgets(maxStanzaBytes)` into client/server options; the limit
-  itself comes from server config or XEP-0478 stream-limits advertisement,
-  which the application reads during connection setup.
+  `stanzaBudgets(maxStanzaBytes)` into client/server options, or let
+  `applyStreamLimits(entity, clientOrServer)` do it from the XEP-0478
+  stream-limits advertisement: it watches the stream features (install it
+  before `entity.start()`) and calls `setStanzaBudgets()` on every
+  announcement, since the limit may change after authentication and on a
+  reconnect.
 
 ## Configuration reference
 

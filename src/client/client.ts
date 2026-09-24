@@ -201,7 +201,9 @@ export class HttpxClient {
 
   constructor(session: XmppSession, options: HttpxClientOptions = {}) {
     this.#session = session;
-    this.#options = options;
+    // Our own copy: setStanzaBudgets() adjusts it later without touching the
+    // caller's object.
+    this.#options = { ...options };
     this.#router = ChunkRouter.acquire(session);
     this.#ibb = IbbManager.acquire(session);
     if (options.ibbWindow !== undefined) {
@@ -217,6 +219,20 @@ export class HttpxClient {
       options.socks5 !== undefined ? { socks5: options.socks5 } : undefined,
     );
     this.#disco = new DiscoCache(session);
+  }
+
+  /**
+   * Re-derives the sizes the stream's stanza limit bounds — inline request
+   * bodies, the chunk size asked of the peer (its stanzas cross our server
+   * too) and this client's own IBB blocks — typically from
+   * `stanzaBudgets(maxBytes)` once the server has advertised its limit
+   * (XEP-0478; see `applyStreamLimits`). Requests already in flight keep the
+   * sizes they started with.
+   */
+  setStanzaBudgets(budgets: { inlineBudgetBytes: number; maxChunkSize: number }): void {
+    this.#options.inlineBudgetBytes = budgets.inlineBudgetBytes;
+    this.#options.maxChunkSize = budgets.maxChunkSize;
+    this.#options.ibbBlockSize = budgets.maxChunkSize;
   }
 
   async request(to: string, init: HttpxRequestInit = {}): Promise<HttpxResponse> {
@@ -277,6 +293,17 @@ export class HttpxClient {
       preferredStreams: this.#options.preferredStreams ?? ["ibb", "chunkedBase64"],
     });
 
+    // A body announced as a stream must be sent as one whatever it came as:
+    // bytes or an element past the inline budget travel exactly like a
+    // ReadableStream would.
+    const streamOfBody = (): ReadableStream<Uint8Array> =>
+      stream ??
+      (source.kind === "bytes"
+        ? streamFromBytes(source.bytes)
+        : source.kind === "element"
+          ? streamFromBytes(textEncoder.encode(source.element.toString()))
+          : streamFromBytes(new Uint8Array(0)));
+
     let data: DataDescriptor | undefined;
     let streamBody:
       | { mechanism: "chunkedBase64"; id: string; chunkSize: number }
@@ -310,15 +337,8 @@ export class HttpxClient {
       case "jingle": {
         // Handshake-driven: the server calls back; nothing to send post-IQ.
         const transport = this.#registry.get(decision.mode)!;
-        const open = () =>
-          stream ??
-          (source.kind === "bytes"
-            ? streamFromBytes(source.bytes)
-            : source.kind === "element"
-              ? streamFromBytes(textEncoder.encode(source.element.toString()))
-              : streamFromBytes(new Uint8Array(0)));
         data = transport.offer(to, {
-          open,
+          open: streamOfBody,
           ...(source.kind === "bytes"
             ? { contentLength: source.bytes.length }
             : source.kind === "stream" && source.contentLength !== undefined
@@ -359,9 +379,9 @@ export class HttpxClient {
     // the request body is still being streamed.
     resultPromise.catch(() => {});
 
-    if (streamBody && stream) {
+    if (streamBody) {
       try {
-        await this.#sendRequestBody(to, from, streamBody, stream, signal);
+        await this.#sendRequestBody(to, from, streamBody, streamOfBody(), signal);
       } catch (err) {
         throw fromXmppError(err);
       }

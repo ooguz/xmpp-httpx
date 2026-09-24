@@ -3,6 +3,7 @@ import { allowAll, allowList, type AuthorizeFn } from "../server/policy.js";
 import { withRateLimit } from "../server/rate-limit.js";
 import { HttpxServer } from "../server/server.js";
 import type { XmppSession } from "../session.js";
+import { applyStreamLimits } from "../transport/limits.js";
 import { stanzaBudgets } from "../transport/select.js";
 import type { GatewayConfig } from "./config.js";
 import { Metrics } from "./metrics.js";
@@ -172,6 +173,19 @@ export async function startGateway(
       ? { maxRequestBodyBytes: config.maxRequestBodyBytes }
       : {}),
   });
+
+  // XEP-0478: the server's advertised stanza limit sizes the budgets unless
+  // the operator fixed them with --max-stanza. Installed before start(), as
+  // the features carrying the limit precede binding; a component stream has
+  // no features, so nothing happens there.
+  if (config.maxStanzaBytes === undefined) {
+    applyStreamLimits(entity, server, (limits, derived) => {
+      log.info(
+        `stream limit ${limits.maxBytes} bytes advertised (XEP-0478): ` +
+          `inline bodies ≤ ${derived.inlineBudgetBytes}, IBB blocks ≤ ${derived.maxChunkSize}`,
+      );
+    });
+  }
 
   // Either shape ends up as one HttpxHandler; everything downstream — logging,
   // metrics, error mapping — is identical.
