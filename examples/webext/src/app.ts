@@ -58,6 +58,8 @@ const DEFAULT_FAVICON = favicon.getAttribute("href") ?? "";
 const embedded = applyEmbedded(document, window.location.search);
 
 const connection = new Connection();
+/** The exit JID for proxy mode, from settings; "" means httpx:// only. */
+let activeExit = "";
 connection.onStateChange = (state) => {
   status.dataset["state"] = state;
   status.textContent =
@@ -306,10 +308,20 @@ function normalizeUrl(raw: string): string {
   return url;
 }
 
+/**
+ * Proxy mode (design §2): an ordinary http(s):// address is fetched through
+ * the configured exit; an httpx:// address addresses its own JID and needs no
+ * exit. So the exit is passed only for ordinary URLs, and only when set.
+ */
+function proxyExtra(url: string): { exit?: string } {
+  return /^https?:\/\//i.test(url) && activeExit ? { exit: activeExit } : {};
+}
+
 const fetchResource = async (resourceUrl: string): Promise<Blob> => {
   const { response } = await cachedFetch(resourceUrl, (headers) =>
     httpxFetch(resourceUrl, {
       session: connection.session,
+      ...proxyExtra(resourceUrl),
       ...(headers ? { headers } : {}),
     }),
   );
@@ -331,6 +343,7 @@ async function fetchThroughCache(
   const request = (headers?: Record<string, string>): Promise<Response> =>
     httpxFetch(href, {
       session: connection.session,
+      ...proxyExtra(href),
       ...(init.method ? { method: init.method } : {}),
       ...(init.body ? { body: init.body } : {}),
       ...(headers ? { headers } : {}),
@@ -540,6 +553,7 @@ async function load(
       res.cleanup = await renderHtml(html, href, {
         iframe: res.iframe,
         fetchResource,
+        proxied: /^https?:\/\//i.test(href),
         onNavigate: (nextUrl) => {
           tabs.activate(tab.id);
           void navigate(nextUrl);
@@ -877,6 +891,7 @@ window.addEventListener("hashchange", () => {
 const serviceInput = $<HTMLInputElement>("service");
 const jidInput = $<HTMLInputElement>("jid");
 const passwordInput = $<HTMLInputElement>("password");
+const exitInput = $<HTMLInputElement>("exit");
 
 $<HTMLFormElement>("settingsForm").addEventListener("submit", (event) => {
   const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
@@ -885,9 +900,11 @@ $<HTMLFormElement>("settingsForm").addEventListener("submit", (event) => {
     service: serviceInput.value.trim(),
     jid: jidInput.value.trim(),
     password: passwordInput.value,
+    exit: exitInput.value.trim(),
   };
   void (async () => {
     await saveSettings(settings);
+    activeExit = settings.exit;
     try {
       setCacheScope(settings.jid);
       await connection.connect(settings);
@@ -906,6 +923,8 @@ void (async () => {
   if (saved.service) serviceInput.value = saved.service;
   if (saved.jid) jidInput.value = saved.jid;
   if (saved.password) passwordInput.value = saved.password;
+  if (saved.exit) exitInput.value = saved.exit;
+  activeExit = saved.exit ?? "";
 
   const initial = window.location.hash.slice(1);
   if (saved.service && saved.jid) {

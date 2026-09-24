@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { resolveHttpxUrl } from "xmpp-httpx";
+import { resolveUrl } from "xmpp-httpx";
 import {
   defaultSubmitter,
   isImplicitSubmitTarget,
@@ -55,6 +55,13 @@ export interface RenderTarget {
   iframe: HTMLIFrameElement;
   fetchResource: (url: string) => Promise<Blob>;
   onNavigate: (url: string) => void;
+  /**
+   * Proxy mode (design §2): the page came from an exit over http(s)://, so its
+   * http(s) subresources and links are fetched through the extension too, not
+   * left to the sandboxed iframe. Off for an httpx:// page, where only httpx://
+   * refs travel over the session.
+   */
+  proxied?: boolean;
   /** A form was submitted; `null` submission means the form was refused. */
   onSubmit?: (submission: FormSubmission | null, reason: FormRefusal | null) => void;
 }
@@ -103,12 +110,17 @@ export async function renderHtml(
   const clean = DOMPurify.sanitize(html, PURIFY_CONFIG);
   const doc = new DOMParser().parseFromString(clean, "text/html");
   const blobs = new BlobCache(target.fetchResource);
+  // A URL the extension fetches (over the XMPP session) rather than leaving to
+  // the iframe: always httpx://, and — on a proxied page — http(s):// too.
+  const proxied = target.proxied ?? false;
+  const viaExtension = (url: string): boolean =>
+    url.startsWith("httpx://") || (proxied && /^https?:\/\//i.test(url));
 
   // CSS pass 1: sanitize and resolve every url() to absolute, collecting the
   // httpx references that need fetching before the document can be shown.
   const cssRefs = new Set<string>();
   sanitizeDocumentStyles(doc, baseUrl, (url) => {
-    if (url.startsWith("httpx://")) cssRefs.add(url);
+    if (viaExtension(url)) cssRefs.add(url);
     return allowSafeSchemes(url);
   });
 
@@ -119,8 +131,8 @@ export async function renderHtml(
     img.removeAttribute("srcset");
     const src = img.getAttribute("src");
     if (!src) continue;
-    const resolved = resolveHttpxUrl(baseUrl, src);
-    if (resolved.startsWith("httpx://")) imageRefs.set(img, resolved);
+    const resolved = resolveUrl(baseUrl, src);
+    if (viaExtension(resolved)) imageRefs.set(img, resolved);
   }
 
   await blobs.load([...cssRefs, ...imageRefs.values()]);
@@ -138,13 +150,13 @@ export async function renderHtml(
   // CSS pass 2: swap the httpx references for their blob: URLs, dropping the
   // declarations whose resource never arrived.
   const substitute: CssUrlResolver = (url) =>
-    url.startsWith("httpx://") ? blobs.get(url) : allowSafeSchemes(url);
+    viaExtension(url) ? blobs.get(url) : allowSafeSchemes(url);
   sanitizeDocumentStyles(doc, baseUrl, substitute);
 
   // Links: resolve to absolute so interception sees final URLs.
   for (const anchor of doc.querySelectorAll("a[href]")) {
     const href = anchor.getAttribute("href");
-    if (href) anchor.setAttribute("href", resolveHttpxUrl(baseUrl, href));
+    if (href) anchor.setAttribute("href", resolveUrl(baseUrl, href));
   }
 
   prepareForms(doc, baseUrl);
@@ -183,7 +195,7 @@ export async function renderHtml(
     if (!anchor) return;
     event.preventDefault();
     const href = anchor.getAttribute("href") ?? "";
-    if (href.startsWith("httpx://")) {
+    if (viaExtension(href)) {
       target.onNavigate(href);
     } else if (/^https?:/i.test(href)) {
       window.open(href, "_blank", "noopener");

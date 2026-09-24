@@ -85,6 +85,27 @@ export function resolveHttpxUrl(base: string | HttpxUrl, ref: string): string {
   return `httpx://${parsed.jid}${resolved.pathname}${resolved.search}`;
 }
 
+/**
+ * Resolve `ref` against `base` whatever the base's scheme, for a client that
+ * browses both httpx:// (native) and, in proxy mode, ordinary http(s):// pages
+ * through an exit. An httpx:// base delegates to resolveHttpxUrl (identical
+ * behaviour); an http(s):// base uses WHATWG resolution; an absolute ref in
+ * any scheme is returned as it is. The fragment is dropped, as resolveHttpxUrl
+ * does, since a fetched resource has none.
+ */
+export function resolveUrl(base: string | HttpxUrl, ref: string): string {
+  const baseHref = typeof base === "string" ? base : base.href;
+  if (/^https?:\/\//i.test(baseHref)) {
+    // WHATWG resolution handles both a relative ref and an already-absolute one
+    // (any scheme), the base being ignored for the latter. The fragment is
+    // dropped, as resolveHttpxUrl does, since a fetched resource has none.
+    const resolved = new URL(ref.trim(), baseHref);
+    resolved.hash = "";
+    return resolved.href;
+  }
+  return resolveHttpxUrl(base, ref);
+}
+
 export function formatHttpxUrl(parts: {
   jid: string;
   path?: string;

@@ -1,4 +1,4 @@
-import { resolveHttpxUrl } from "xmpp-httpx";
+import { resolveUrl } from "xmpp-httpx";
 
 /**
  * CSS sanitizer built on CSSOM (`CSSStyleSheet.replaceSync`) rather than a
@@ -39,7 +39,7 @@ function resolveToken(
   if (trimmed === "" || trimmed.startsWith("#")) return trimmed; // url(#svg-filter)
   let absolute: string;
   try {
-    absolute = resolveHttpxUrl(baseUrl, trimmed);
+    absolute = resolveUrl(baseUrl, trimmed);
   } catch {
     return null;
   }

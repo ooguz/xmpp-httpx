@@ -23,6 +23,7 @@ export {
   formatHttpxUrl,
   parseHttpxUrl,
   resolveHttpxUrl,
+  resolveUrl,
   resourceForm,
   type HttpxUrl,
   type ResourceForm,

@@ -4,9 +4,14 @@ export interface ConnectionSettings {
   service: string;
   jid: string;
   password: string;
+  /**
+   * An n146 exit JID for proxy mode: when set, ordinary http(s):// addresses
+   * are fetched through it (design §2). Empty means httpx:// only.
+   */
+  exit: string;
 }
 
-const KEYS = ["service", "jid", "password"];
+const KEYS = ["service", "jid", "password", "exit"];
 
 function extensionStorage() {
   return extensionApi()?.storage?.local;
@@ -34,6 +39,6 @@ export async function saveSettings(settings: ConnectionSettings): Promise<void> 
     return;
   }
   for (const key of KEYS) {
-    localStorage.setItem(`httpx.${key}`, settings[key as keyof ConnectionSettings]);
+    localStorage.setItem(`httpx.${key}`, settings[key as keyof ConnectionSettings] ?? "");
   }
 }

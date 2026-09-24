@@ -3,8 +3,37 @@ import {
   formatHttpxUrl,
   parseHttpxUrl,
   resolveHttpxUrl,
+  resolveUrl,
   resourceForm,
 } from "../../src/urls.js";
+
+describe("resolveUrl (scheme-agnostic, for proxy mode)", () => {
+  it("resolves against an httpx:// base exactly as resolveHttpxUrl does", () => {
+    const base = "httpx://web@example.org/dir/page.html";
+    for (const ref of ["other.html", "../img/logo.png", "/abs?x=1", "httpx://other@x.org/y", "https://x.org/z", "mailto:a@b"]) {
+      expect(resolveUrl(base, ref)).toBe(resolveHttpxUrl(base, ref));
+    }
+  });
+
+  it("resolves relative refs against an http(s):// base with WHATWG rules", () => {
+    const base = "https://example.org/dir/page.html?a=1";
+    expect(resolveUrl(base, "other.html")).toBe("https://example.org/dir/other.html");
+    expect(resolveUrl(base, "../img/logo.png")).toBe("https://example.org/img/logo.png");
+    expect(resolveUrl(base, "/abs?x=1")).toBe("https://example.org/abs?x=1");
+    expect(resolveUrl(base, "//cdn.example.net/x.js")).toBe("https://cdn.example.net/x.js");
+  });
+
+  it("returns an already-absolute ref unchanged, whatever its scheme", () => {
+    const base = "http://example.org/p";
+    expect(resolveUrl(base, "https://other.org/y")).toBe("https://other.org/y");
+    expect(resolveUrl(base, "httpx://web@x.org/z")).toBe("httpx://web@x.org/z");
+    expect(resolveUrl(base, "data:text/plain,hi")).toBe("data:text/plain,hi");
+  });
+
+  it("drops the fragment, like the httpx resolver", () => {
+    expect(resolveUrl("https://example.org/p", "q#frag")).toBe("https://example.org/q");
+  });
+});
 
 describe("httpx URLs", () => {
   it("parses a full URL", () => {
