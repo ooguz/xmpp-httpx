@@ -1,4 +1,4 @@
-import { parseHttpxUrl } from "xmpp-httpx";
+import { canonicalUrl, parseHttpxUrl } from "xmpp-httpx";
 import { extensionApi } from "./ext.js";
 
 /**
@@ -72,7 +72,8 @@ function fromDisposition(value: string | null): string | undefined {
 function lastPathSegment(url: string): string | undefined {
   let path: string;
   try {
-    path = parseHttpxUrl(url).path;
+    const href = canonicalUrl(url);
+    path = href.startsWith("httpx://") ? parseHttpxUrl(href).path : new URL(href).pathname;
   } catch {
     return undefined;
   }

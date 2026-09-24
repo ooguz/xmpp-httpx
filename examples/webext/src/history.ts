@@ -1,4 +1,4 @@
-import { parseHttpxUrl } from "xmpp-httpx";
+import { canonicalUrl } from "xmpp-httpx";
 import { readStored, writeStored } from "./ext.js";
 
 /**
@@ -85,7 +85,7 @@ export async function recordVisit(
 ): Promise<HistoryEntry[]> {
   let href: string;
   try {
-    href = parseHttpxUrl(url).href; // never record something we can't revisit
+    href = canonicalUrl(url); // never record something we can't revisit
   } catch {
     return listHistory();
   }
@@ -125,7 +125,7 @@ export async function toggleBookmark(
 ): Promise<boolean> {
   let href: string;
   try {
-    href = parseHttpxUrl(url).href;
+    href = canonicalUrl(url);
   } catch {
     return false;
   }

@@ -20,6 +20,7 @@ export * from "./codec/index.js";
 
 // URLs and session abstraction
 export {
+  canonicalUrl,
   formatHttpxUrl,
   parseHttpxUrl,
   resolveHttpxUrl,

@@ -78,6 +78,9 @@ describe("filenameFor", () => {
     expect(filenameFor("httpx://site@example.org/a/b/%C3%A7.bin", null)).toBe(
       "ç.bin",
     );
+    expect(filenameFor("https://example.org/files/report.pdf?v=2#x", null)).toBe(
+      "report.pdf",
+    );
   });
 
   it("falls back to 'download' when there is no usable name", () => {

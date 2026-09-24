@@ -1,4 +1,4 @@
-import { parseHttpxUrl, resolveHttpxUrl } from "xmpp-httpx";
+import { parseHttpxUrl, resolveUrl } from "xmpp-httpx";
 
 /**
  * Form support, limited to what httpx can actually carry: GET queries and
@@ -21,7 +21,10 @@ export type FormRefusal = "external-action" | "file-upload" | "multipart";
 const REFUSAL_ATTR = "data-httpx-refusal";
 
 export interface FormSubmission {
-  /** Absolute httpx URL; for GET the computed query is already applied. */
+  /**
+   * Absolute URL — httpx://, or http(s):// on a proxied page; for GET the
+   * computed query is already applied.
+   */
   url: string;
   method: "GET" | "POST";
   /** urlencoded pairs, POST only. */
@@ -54,12 +57,12 @@ export function prepareForms(doc: Document, baseUrl: string): void {
     const action = form.getAttribute("action")?.trim() ?? "";
     let resolved: string;
     try {
-      resolved = action === "" ? baseUrl : resolveHttpxUrl(baseUrl, action);
+      resolved = action === "" ? baseUrl : resolveUrl(baseUrl, action);
     } catch {
       resolved = baseUrl;
     }
 
-    if (!resolved.startsWith("httpx://")) {
+    if (!isSubmittable(resolved, baseUrl)) {
       refuse(form, "external-action");
       // Leave nothing loadable behind: even if interception broke, the
       // document must not be able to post user input to the internet.
@@ -75,6 +78,16 @@ export function prepareForms(doc: Document, baseUrl: string): void {
       refuse(form, "multipart");
     }
   }
+}
+
+/**
+ * An httpx action is always ours to submit. An http(s) action is only on a
+ * proxied page (an http(s) base): it then goes through the exit as the page
+ * did. From an httpx page the ordinary web stays out of reach, as before.
+ */
+function isSubmittable(action: string, baseUrl: string): boolean {
+  if (action.startsWith("httpx://")) return true;
+  return /^https?:\/\//i.test(action) && /^https?:\/\//i.test(baseUrl);
 }
 
 function refuse(form: Element, reason: FormRefusal): void {
@@ -137,8 +150,14 @@ export function submissionFor(
   if (method === "POST") return { url: action, method, body: params };
 
   // GET replaces any query already in the action, as browsers do.
-  const url = parseHttpxUrl(action);
   const query = params.toString();
+  if (/^https?:\/\//i.test(action)) {
+    const web = new URL(action);
+    web.search = query;
+    web.hash = "";
+    return { url: web.href, method };
+  }
+  const url = parseHttpxUrl(action);
   return {
     url: `httpx://${url.jid}${url.path}${query === "" ? "" : `?${query}`}`,
     method,

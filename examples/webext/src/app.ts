@@ -1,4 +1,4 @@
-import { httpxFetch, parseHttpxUrl } from "xmpp-httpx";
+import { canonicalUrl, httpxFetch } from "xmpp-httpx";
 import {
   cachedFetch,
   clearCache,
@@ -209,7 +209,7 @@ function syncChrome(): void {
   if (current !== "" && `#${current}` !== hash) {
     try {
       respelling =
-        serializedSpelling(parseHttpxUrl(normalizeUrl(current)).href) === tab.url;
+        serializedSpelling(canonicalUrl(normalizeUrl(current))) === tab.url;
     } catch {
       respelling = false;
     }
@@ -421,9 +421,11 @@ async function navigate(
   const url = normalizeUrl(rawUrl);
   if (url === "") return;
 
+  // httpx:// natively; http(s):// too, which load() sends through the exit
+  // (proxy mode) — or reports as needing one.
   let href: string;
   try {
-    href = serializedSpelling(parseHttpxUrl(url).href);
+    href = serializedSpelling(canonicalUrl(url));
   } catch (err) {
     // The typo still takes an entry — like a browser's error page — so a host
     // back/forward walks over it consistently instead of finding the hash and

@@ -52,6 +52,12 @@ describe("history", () => {
     ]);
   });
 
+  it("records proxied web pages under their canonical spelling, and nothing else", async () => {
+    await recordVisit("HTTPS://Example.org/p#frag", "Web", 1000);
+    await recordVisit("mailto:a@b.c", "Nope", 2000);
+    expect((await listHistory()).map((e) => e.url)).toEqual(["https://example.org/p"]);
+  });
+
   it("puts the most recent visit first", async () => {
     await recordVisit(A, "Page A", 1000);
     await recordVisit(B, "Page B", 2000);
@@ -78,7 +84,7 @@ describe("history", () => {
   });
 
   it("refuses to record something it could not revisit", async () => {
-    await recordVisit("https://example.org/", "not httpx", 1000);
+    await recordVisit("mailto:a@example.org", "not a page", 1000);
     await recordVisit("garbage", "nope", 1000);
     expect(await listHistory()).toEqual([]);
   });
@@ -140,8 +146,13 @@ describe("bookmarks", () => {
     expect((await removeBookmark(B)).map((m) => m.url)).toEqual([A]);
   });
 
-  it("refuses non-httpx URLs", async () => {
-    expect(await toggleBookmark("https://example.org/", "x", 1000)).toBe(false);
+  it("refuses URLs it cannot load", async () => {
+    expect(await toggleBookmark("mailto:a@example.org", "x", 1000)).toBe(false);
     expect(await listBookmarks()).toEqual([]);
+  });
+
+  it("bookmarks proxied web pages under their canonical spelling", async () => {
+    expect(await toggleBookmark("HTTPS://Example.org/p#frag", "Web", 1000)).toBe(true);
+    expect((await listBookmarks()).map((m) => m.url)).toEqual(["https://example.org/p"]);
   });
 });

@@ -106,6 +106,22 @@ export function resolveUrl(base: string | HttpxUrl, ref: string): string {
   return resolveHttpxUrl(base, ref);
 }
 
+/**
+ * The canonical spelling of a URL a client browses — the identity a tab,
+ * history entry or bookmark is keyed by. An httpx:// URL is parseHttpxUrl's
+ * href; an http(s):// one (proxy mode) is the WHATWG serialization, fragment
+ * dropped, so "HTTPS://Example.org" and "https://example.org/" are one page.
+ * Anything else throws a TypeError, as parseHttpxUrl does.
+ */
+export function canonicalUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.href;
+  }
+  return parseHttpxUrl(url).href;
+}
+
 export function formatHttpxUrl(parts: {
   jid: string;
   path?: string;

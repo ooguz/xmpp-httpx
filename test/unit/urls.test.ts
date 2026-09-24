@@ -1,11 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalUrl,
   formatHttpxUrl,
   parseHttpxUrl,
   resolveHttpxUrl,
   resolveUrl,
   resourceForm,
 } from "../../src/urls.js";
+
+describe("canonicalUrl (page identity across both schemes)", () => {
+  it("is parseHttpxUrl's href for an httpx URL", () => {
+    for (const url of ["httpx://web@example.org", "httpx://web@example.org/a?b=1#c"]) {
+      expect(canonicalUrl(url)).toBe(parseHttpxUrl(url).href);
+    }
+  });
+
+  it("serializes an http(s) URL the WHATWG way and drops the fragment", () => {
+    expect(canonicalUrl("HTTPS://Example.org")).toBe("https://example.org/");
+    expect(canonicalUrl("http://example.org/a b?q=1#frag")).toBe("http://example.org/a%20b?q=1");
+  });
+
+  it("throws a TypeError for anything else", () => {
+    for (const url of ["mailto:a@b", "ftp://x/", "example.org", ""]) {
+      expect(() => canonicalUrl(url)).toThrow(TypeError);
+    }
+  });
+});
 
 describe("resolveUrl (scheme-agnostic, for proxy mode)", () => {
   it("resolves against an httpx:// base exactly as resolveHttpxUrl does", () => {

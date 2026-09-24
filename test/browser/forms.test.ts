@@ -61,6 +61,26 @@ describe("prepareForms", () => {
     expect(refusalFor(form)).toBe("multipart");
   });
 
+  it("on a proxied (http(s)) page, resolves and accepts web actions", () => {
+    const doc = new DOMParser().parseFromString(
+      `<form action="search"></form>
+       <form action="https://other.example/collect"></form>
+       <form action="httpx://site@example.org/q"></form>
+       <form action="mailto:a@b.c"></form>`,
+      "text/html",
+    );
+    prepareForms(doc, "https://example.org/dir/page.html");
+    const [relative, absolute, httpx, mailto] = Array.from(doc.querySelectorAll("form"));
+    expect(relative!.getAttribute("action")).toBe("https://example.org/dir/search");
+    expect(refusalFor(relative!)).toBeNull();
+    expect(absolute!.getAttribute("action")).toBe("https://other.example/collect");
+    expect(refusalFor(absolute!)).toBeNull();
+    expect(httpx!.getAttribute("action")).toBe("httpx://site@example.org/q");
+    expect(refusalFor(httpx!)).toBeNull();
+    expect(refusalFor(mailto!)).toBe("external-action");
+    expect(mailto!.hasAttribute("action")).toBe(false);
+  });
+
   it("strips submitter overrides and the form target", () => {
     const form = prepare(
       `<form action="/a" target="_blank">
@@ -98,6 +118,21 @@ describe("submissionFor", () => {
   it("drops the query entirely when the form is empty", () => {
     const form = prepare('<form action="/s?old=1"></form>');
     expect(submissionFor(form)!.url).toBe("httpx://site@example.org/s");
+  });
+
+  it("builds a web GET the same way on a proxied page", () => {
+    const doc = new DOMParser().parseFromString(
+      `<form action="/s?old=1#frag"><input name="q" value="a b"></form>
+       <form action="/s?old=1"></form>`,
+      "text/html",
+    );
+    prepareForms(doc, "https://example.org/dir/page.html");
+    const [filled, empty] = Array.from(doc.querySelectorAll("form"));
+    expect(submissionFor(filled!)).toEqual({
+      url: "https://example.org/s?q=a+b",
+      method: "GET",
+    });
+    expect(submissionFor(empty!)!.url).toBe("https://example.org/s");
   });
 
   it("builds a urlencoded body for POST", () => {
