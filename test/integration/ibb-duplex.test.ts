@@ -20,7 +20,8 @@ import {
   type HttpxTunnel,
 } from "../../src/server/server.js";
 import { createSessionPair, type MockSession } from "../../src/testing/mock-session.js";
-import { concatBytes } from "../../src/util/bytes.js";
+import { concatBytes, textDecoder } from "../../src/util/bytes.js";
+import { encodeBase64 } from "../../src/util/base64.js";
 
 /**
  * One IBB session carrying bytes both ways (design §4.2): the opener's sid,
@@ -656,7 +657,7 @@ function foreignPeer(): Foreign {
           xml(
             "iq",
             { type: "set", to: OPENER },
-            xml("data", { xmlns: NS_IBB, sid: "t", seq: String(seq) }, Buffer.from(bytes).toString("base64")),
+            xml("data", { xmlns: NS_IBB, sid: "t", seq: String(seq) }, encodeBase64(bytes)),
           ),
         );
         return "ok";
@@ -728,7 +729,7 @@ describe("duplex IBB against a peer that is not this library", () => {
         received.push(value!);
       }
     })();
-    const text = () => Buffer.from(concatBytes(received)).toString();
+    const text = () => textDecoder.decode(concatBytes(received));
     const bytes = (s: string) => new TextEncoder().encode(s);
 
     expect(await peer.sendData(0, bytes("AAA"))).toBe("ok");
