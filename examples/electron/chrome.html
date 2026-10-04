@@ -31,6 +31,12 @@
         </label>
         <label>JID <input id="jid" type="text" placeholder="alice@localhost" required /></label>
         <label>Password <input id="password" type="password" /></label>
+        <label>Exit (optional)
+          <input id="exit" type="text" placeholder="exit.example.org" />
+        </label>
+        <p class="hint">With an exit set, web addresses go through it: HTTPS as a tunnel, so the
+          exit sees only which site you reach, while plain http pages it can read. With none,
+          web addresses do not load at all.</p>
         <p class="warning">Demo-grade: credentials are stored in plaintext under the app's user-data directory.</p>
         <p id="settingsError" class="error" hidden></p>
         <menu>

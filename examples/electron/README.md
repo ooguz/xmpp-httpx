@@ -50,6 +50,25 @@ The address bar shows the JID form either way. Account JIDs are best-effort:
 localparts that a hostname cannot hold will not survive the trip. Component
 domains need no encoding at all.
 
+## The ordinary web, through an exit
+
+Set **Exit** in the connection settings to an n146-style exit's JID (one that
+answers CONNECT and absolute-form requests, such as `n146-exit` or an
+`HttpxServer` built from `xmpp-httpx/node`'s forward-proxy handlers), and
+`https://` and `http://` addresses load through it. The shell runs a small HTTP
+proxy on loopback and points its Chromium at it:
+
+- **HTTPS** becomes a CONNECT tunnel over the XMPP session. TLS stays between
+  Chromium and the site; the exit learns only the host and port.
+- **Plain http** becomes an absolute-form request the exit fetches. The exit can
+  read it, as anyone on the path could read plain http.
+
+It fails closed. Chromium is pointed at the proxy whether or not an exit is set,
+so with none, or while disconnected, a web address shows a short explanation
+instead of loading directly. Loopback stays direct. WebRTC may not use UDP
+outside the proxy, so a page cannot learn this machine's addresses that way.
+Chromium's own cache still serves pages it already has, as any browser does.
+
 ## What it does not do yet
 
 - No packaging, so no `.desktop`/registry/plist registration.

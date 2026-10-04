@@ -27,6 +27,13 @@ const EXAMPLE_ALIAS = {
         find: /^xmpp-httpx$/,
         replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
       },
+      // The Electron shell's web proxy also imports the Node subpath; without
+      // this it would load the built dist/ beside the sources, two copies of
+      // the library whose classes do not recognise each other.
+      {
+        find: /^xmpp-httpx\/node$/,
+        replacement: fileURLToPath(new URL("./src/node/index.ts", import.meta.url)),
+      },
     ],
   },
 };

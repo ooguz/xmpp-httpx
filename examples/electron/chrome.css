@@ -39,6 +39,6 @@ dialog { border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
          border-radius: 10px; min-width: 22rem; }
 dialog label { display: block; margin: 0.6rem 0; }
 dialog input { width: 100%; font: inherit; padding: 0.3rem 0.5rem; margin-top: 0.2rem; }
-dialog .warning { font-size: 0.8rem; opacity: 0.75; }
+dialog .warning, dialog .hint { font-size: 0.8rem; opacity: 0.75; }
 dialog .error { font-size: 0.85rem; color: #b3261e; }
 dialog menu { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0; }

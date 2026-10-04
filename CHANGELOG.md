@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Electron shell: the ordinary web through an exit, end to end.** With an
+  exit set, the shell's Chromium loads `https://` and `http://` through a
+  loopback proxy (`examples/electron/src/web-proxy.ts`): HTTPS as a CONNECT
+  tunnel over the XMPP session (`bridgeTunnel`), so TLS stays between Chromium
+  and the site and the exit learns host and port only; plain http as an
+  absolute-form request. It fails closed: with no exit or no session a web
+  address gets an explanation, never a direct load (before, a link from an
+  httpx page to the web loaded directly). WebRTC is kept off direct UDP. The
+  address bar no longer relabels web URLs as `httpx://`.
 - **Browser extension: favicons in proxy mode, and a plain warning.** On a
   page that was itself fetched through an exit, an `http(s)` icon is now
   loaded too, through the same exit over the XMPP session, never directly.

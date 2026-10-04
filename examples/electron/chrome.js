@@ -66,6 +66,7 @@ window.httpx.onSettings((settings) => {
   if (settings.service) $("service").value = settings.service;
   if (settings.jid) $("jid").value = settings.jid;
   if (settings.password) $("password").value = settings.password;
+  if (settings.exit) $("exit").value = settings.exit;
   if (!settings.service || !settings.jid) settingsDialog.showModal();
 });
 
@@ -88,6 +89,7 @@ $("settingsForm").addEventListener("submit", (event) => {
       service: $("service").value.trim(),
       jid: $("jid").value.trim(),
       password: $("password").value,
+      exit: $("exit").value.trim(),
     })
     .then((result) => {
       if (result && result.ok === false) {

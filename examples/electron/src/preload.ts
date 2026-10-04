@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld("httpx", {
   forward: () => ipcRenderer.invoke("httpx:forward"),
   reload: () => ipcRenderer.invoke("httpx:reload"),
   state: () => ipcRenderer.invoke("httpx:state"),
-  connect: (settings: { service: string; jid: string; password: string }) =>
+  connect: (settings: { service: string; jid: string; password: string; exit: string }) =>
     ipcRenderer.invoke("httpx:connect", settings),
   onState: (listener: (state: unknown) => void) => {
     ipcRenderer.on("httpx:state", (_event, state) => listener(state));

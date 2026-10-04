@@ -96,6 +96,9 @@ export function toNavigableUrl(typed: string): string {
 
 /** The inverse, for the address bar: show the JID, not the encoding. */
 export function toDisplayUrl(navigable: string): string {
+  // Only httpx URLs carry an encoded JID; a web page (through the exit) or
+  // about:blank is shown as it is.
+  if (!/^httpx:/i.test(navigable)) return navigable;
   try {
     const url = new URL(navigable);
     return `httpx://${decodeJidFromHost(url.hostname)}${url.pathname}${url.search}`;

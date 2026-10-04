@@ -15,6 +15,7 @@ import {
   toDisplayUrl,
   toNavigableUrl,
 } from "./protocol.js";
+import { startWebProxy, type WebProxy } from "./web-proxy.js";
 
 /**
  * The main process: it owns the XMPP connection *and* the `httpx` scheme, which
@@ -44,6 +45,8 @@ interface Settings {
   service: string;
   jid: string;
   password: string;
+  /** The exit web addresses go through; "" or absent for none. */
+  exit?: string;
 }
 
 interface Tab {
@@ -56,6 +59,9 @@ const CHROME_HEIGHT = 88;
 let connection: ReturnType<typeof client> | null = null;
 let xmppSession: XmppSession | null = null;
 let connectionState: "offline" | "connecting" | "online" = "offline";
+/** Where http(s) goes (see web-proxy.ts); "" sends nothing anywhere. */
+let currentExit = "";
+let webProxy: WebProxy | undefined;
 
 const tabs: Tab[] = [];
 let activeTabId = 0;
@@ -193,15 +199,19 @@ function openTab(url?: string): Tab {
   // Registered one by one, not in a loop: Electron types `on()` per event name,
   // so a union of names is (correctly) not assignable.
   const contents = view.webContents;
+  // UDP cannot go through the proxy, so WebRTC may not use it directly either:
+  // it would hand the page this machine's addresses past the exit.
+  contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
   const refresh = (): void => publishState();
   contents.on("did-navigate", refresh);
   contents.on("did-navigate-in-page", refresh);
   contents.on("page-title-updated", refresh);
   contents.on("did-finish-load", refresh);
   contents.on("did-fail-load", refresh);
-  // An httpx page must not be able to open http(s) windows.
+  // New windows become tabs. http(s) is safe to open: it goes through the
+  // web proxy, which sends it to the exit or refuses it, never directly.
   contents.setWindowOpenHandler(({ url: target }) => {
-    if (target.startsWith("httpx://")) {
+    if (/^(httpx|https?):\/\//i.test(target)) {
       openTab(target);
       layout();
       publishState();
@@ -256,6 +266,18 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 async function startShell(): Promise<void> {
+  // Every http(s) request from every tab goes to the web proxy, whether or not
+  // an exit is set: with none it answers with an explanation, so a web address
+  // never loads directly. Loopback stays direct (Chromium's implicit bypass).
+  webProxy = await startWebProxy({
+    session: () => xmppSession,
+    exit: () => currentExit,
+    onRequest: ({ target, status }) => console.log(`[shell] web ${target} → ${status}`),
+  });
+  await electronSession.defaultSession.setProxy({
+    proxyRules: `http://127.0.0.1:${webProxy.port}`,
+  });
+
   protocol.handle(
     "httpx",
     createHttpxProtocolHandler({
@@ -288,6 +310,7 @@ async function startShell(): Promise<void> {
   // Connect first: a URL from the command line (or an OS handler) should load
   // the page, not the "not connected" placeholder.
   const saved = await loadSettings();
+  currentExit = saved.exit?.trim() ?? "";
   chromeView.webContents.send("httpx:settings", saved);
   if (saved.service && saved.jid) {
     try {
@@ -333,7 +356,9 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on("window-all-closed", () => {
-    void disconnect().then(() => app.quit());
+    void disconnect()
+      .then(() => webProxy?.close())
+      .then(() => app.quit());
   });
 
   app.whenReady().then(startShell, (err: unknown) => {
@@ -370,6 +395,7 @@ ipcMain.handle("httpx:state", () => tabState());
 
 ipcMain.handle("httpx:connect", async (_event, settings: Settings) => {
   await saveSettings(settings);
+  currentExit = settings.exit?.trim() ?? "";
   try {
     await connect(settings);
     return { ok: true };
@@ -385,6 +411,14 @@ function normalizeTyped(typed: string): string | null {
   const trimmed = typed.trim();
   if (trimmed === "") return null;
   const withScheme = trimmed.includes("://") ? trimmed : `httpx://${trimmed}`;
+  // A web address goes to Chromium as it is; the web proxy routes it.
+  if (/^https?:\/\//i.test(withScheme)) {
+    try {
+      return new URL(withScheme).href;
+    } catch {
+      return null;
+    }
+  }
   if (!withScheme.toLowerCase().startsWith("httpx://")) return null;
   try {
     return toNavigableUrl(withScheme);

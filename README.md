@@ -232,8 +232,10 @@ cd examples/electron && npm install && npm start
 
 Page scripts are off by default (a CSP the protocol handler imposes over the
 server's), content lives in sandboxed views with no preload, and account JIDs are
-encoded into the host because a `Request` URL cannot carry credentials. See
-[docs/electron-shell.md](docs/electron-shell.md).
+encoded into the host because a `Request` URL cannot carry credentials. With
+an exit set, ordinary `https://` and `http://` addresses load through it: HTTPS
+as a CONNECT tunnel, so TLS stays end to end. With none, they do not load at
+all. See [docs/electron-shell.md](docs/electron-shell.md).
 
 ## The Dillo plugin
 

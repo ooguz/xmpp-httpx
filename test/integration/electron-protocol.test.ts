@@ -59,6 +59,10 @@ describe("JID ↔ host encoding", () => {
     expect(decodeJidFromHost("web.example.org")).toBe("web.example.org");
     expect(toNavigableUrl("httpx://web.example.org/x")).toBe("httpx://web.example.org/x");
     expect(toDisplayUrl("httpx://web.example.org/x")).toBe("httpx://web.example.org/x");
+    // A web page or a blank tab is shown as it is, never relabelled httpx.
+    for (const url of ["https://example.org/a?b=1", "http://example.org/", "about:blank"]) {
+      expect(toDisplayUrl(url)).toBe(url);
+    }
   });
 });
 

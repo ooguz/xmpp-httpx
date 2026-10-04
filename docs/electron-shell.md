@@ -92,8 +92,23 @@ Process separation follows the same logic:
 - The chrome (tab strip, address bar) is a separate `WebContentsView` that does
   have a preload: a `contextBridge` surface of named IPC calls, nothing else.
   Page renderers and the chrome renderer never share a process.
-- `setWindowOpenHandler` denies every `window.open` except `httpx://`, which
-  opens a tab.
+- `setWindowOpenHandler` opens `httpx://`, `https://` and `http://` targets as
+  tabs and denies everything else.
+
+The ordinary web (2026-10-05) goes through an exit, never directly. At startup
+the shell starts `web-proxy.ts`, a loopback HTTP proxy, and points the session at
+it with `setProxy`, whether or not an exit is configured. CONNECT (every
+`https://` load, and WebSockets) becomes `HttpxClient.connect()` to the exit,
+piped with the library's `bridgeTunnel`, so TLS stays end to end and the exit
+sees host and port only. Plain `http://` becomes an absolute-form request the
+exit fetches. With no exit set, or no session, the proxy answers 502 with an
+explanation, so a link from an httpx page to the web, or a typed address, never
+loads directly. Tabs set WebRTC to `disable_non_proxied_udp`. The httpx CSP
+above is unchanged: it governs httpx pages only, and a web page loaded through
+the exit is an ordinary web page with Chromium's usual rules. Verified with the
+real shell against Prosody and an n146 exit: https://example.org/ loads through a
+tunnel and http://example.com/ through a request; with the exit stopped and an
+empty cache, both answer 502.
 
 ## Structure
 
