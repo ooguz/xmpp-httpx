@@ -34,7 +34,7 @@ npm publish        # prepublishOnly runs lint + typecheck + tests + build
 ```
 
 The tarball was inspected with `npm pack --dry-run`: `dist/` + `src/` +
-README/LICENSE/CHANGELOG, ~95 kB. The package is unscoped, so it is public
+README/LICENSE/CHANGELOG, ~290 kB packed at 0.10.0. The package is unscoped, so it is public
 by default. Consider `npm publish --provenance` once publishing from CI.
 
 ## 3. Sign and submit the browser extension

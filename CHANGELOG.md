@@ -1,7 +1,34 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 — 2026-10-04
 
+- **Proxy mode: the ordinary web through an exit.** `httpxFetch(url, { session,
+  exit })` sends an `http://` or `https://` URL to the exit's JID as an
+  absolute-form request (the exit must advertise
+  `urn:xmpp:http#absolute-form`); an `httpx://` URL ignores `exit` and goes to
+  its own JID as before. An ordinary URL with no exit throws a `TypeError`,
+  the same error a non-httpx URL always raised, so callers that map it to a
+  "not an httpx address" page keep working. `resolveUrl(base, ref)` resolves
+  links against either kind of base, and `canonicalUrl(url)` gives a page one
+  spelling across both schemes (fragment dropped), for use as a history,
+  bookmark or cache key. The bundled browser extension uses all three.
+- **XEP-0478 stream limits drive the stanza budgets.** `parseStreamLimits`
+  reads the `<limits/>` a server announces in its stream features;
+  `watchStreamLimits` installs the listener (before `entity.start()`, since
+  the features precede binding) and reports each announcement, and
+  `applyStreamLimits(entity, clientOrServer)` feeds each one through
+  `stanzaBudgets()` into the new `HttpxClient.setStanzaBudgets()` /
+  `HttpxServer.setStanzaBudgets()`. The limit may change after authentication
+  and on every reconnect, and requests started afterwards follow it. The
+  gateway CLI applies it unless `--max-stanza` fixes the budgets. A value that
+  is not a positive integer is ignored.
+- **Fixed: a request body given as bytes or a string that exceeded the inline
+  budget was never sent.** The client announced an IBB stream for it and then
+  opened none, so the request timed out; only a `ReadableStream` body was ever
+  streamed. The stream is now made from whatever the body came as.
+- **Installable from git.** A `prepare` script builds the package when it is
+  installed as a git dependency, so `npm install github:ooguz/xmpp-httpx#…`
+  gives a working `dist/`.
 - **Extension elements on `<req/>` and `<resp/>`.** Children in a namespace
   other than `urn:xmpp:http` and SHIM headers ride along verbatim:
   `HttpxRequestInit.extensions` / `HttpxConnectInit.extensions` on the way
