@@ -447,12 +447,14 @@ on the other end.
 
 ## Cross-cutting quick wins (any time)
 
-- [~] **CI action versions** (S): `actions/checkout` and `actions/setup-node`
-  are on `@v5` (2026-09-24). `upload-pages-artifact@v3` / `deploy-pages@v4`
-  are left as they are until their next majors are verified. The move of
-  `ubuntu-latest` to Ubuntu 26 (2026-10-19) is covered: a manual run takes a
-  `runner` input, and the whole workflow, the Docker E2E job included, passed
-  on `ubuntu-26.04` on 2026-10-04 (run 37230681901; n146's too).
+- [x] **CI action versions** (S, 2026-10-05): every action is on its latest
+  major (`checkout`/`setup-node` v7, `configure-pages` v6,
+  `upload-pages-artifact`/`deploy-pages` v5), each major's release notes read
+  first. The one behaviour change that touches us, `upload-pages-artifact` v4+
+  leaving dotfiles out, drops typedoc's `.nojekyll`, which an Actions deploy
+  never needed. The move of `ubuntu-latest` to Ubuntu 26 (2026-10-19) is
+  covered: a manual run takes a `runner` input, and the whole workflow, the
+  Docker E2E job included, passed on `ubuntu-26.04` on 2026-10-04.
 - [x] `HttpxResponse.formData()`, which delegates to the platform's parser, so
   multipart works without a multipart parser living here, plus
   `parseAccept`/`negotiateContentType` for content negotiation that gets
