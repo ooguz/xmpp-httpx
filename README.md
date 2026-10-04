@@ -31,7 +31,7 @@ Documentation:
 - All seven body transports of the XEP: inline `text` / `xml` / `base64`, `chunkedBase64` message streams, IBB ([XEP-0047](https://xmpp.org/extensions/xep-0047.html), implemented here since no upstream xmpp.js package exists), sipub ([XEP-0137](https://xmpp.org/extensions/xep-0137.html) over SI, IBB stream method), and a Jingle session ([XEP-0166](https://xmpp.org/extensions/xep-0166.html)/[0234](https://xmpp.org/extensions/xep-0234.html)) over either the [XEP-0261](https://xmpp.org/extensions/xep-0261.html) IBB transport or [XEP-0260](https://xmpp.org/extensions/xep-0260.html) SOCKS5 bytestreams with candidate negotiation and automatic IBB fallback. sipub/jingle are opt-in for sending (`preferredStreams`), always accepted on receive
 - SHIM headers ([XEP-0131](https://xmpp.org/extensions/xep-0131.html)), `httpx://` URL parsing, service discovery ([XEP-0030](https://xmpp.org/extensions/xep-0030.html)), entity caps ([XEP-0115](https://xmpp.org/extensions/xep-0115.html)) with presence-based capability caching
 - A `fetch()`-shaped API returning real WHATWG `Response` objects with streaming bodies
-- A reverse-proxy handler for gateway deployments (`xmpp-httpx/node`)
+- A reverse-proxy handler for gateway deployments, and a forward proxy (destination policy, request and CONNECT handlers) for exits (`xmpp-httpx/node`)
 - A ready-made gateway CLI (`xmpp-httpx-gateway`) with a Docker image
 - A published test harness (`xmpp-httpx/testing`) so downstream code can be tested without an XMPP server
 
@@ -154,6 +154,19 @@ const { response, tunnel } = await httpx.connect("exit@example.org", { authority
 ```
 
 `tunnels: true` advertises `urn:xmpp:http:connect:0`. Without it, CONNECT is answered 501 and never reaches the handler. `connect()` refuses a peer whose disco lacks the feature. There is no half-close: `close()` on either side ends both directions. A tunnel has no idle watchdog, so noticing a peer that has vanished is up to the application.
+
+The handler above dials whatever it is asked to, which is fine for a test and wrong for anything reachable by others. An exit open to other people needs a destination policy. `xmpp-httpx/node` has the one [n146](https://github.com/ooguz/n146) runs. By default it allows the public internet on ports 80 and 443 only, and refuses private, loopback, link-local and cloud-metadata addresses and the host's own. It checks the address actually dialled, after name resolution, so DNS rebinding cannot slip past it:
+
+```js
+import { DestinationPolicy, createConnectHandler, createForwardProxyHandler } from "xmpp-httpx/node";
+
+const policy = new DestinationPolicy();           // { allowPorts, allowPrivate } to widen it
+const tunnels = createConnectHandler({ policy });  // CONNECT: dial, then pipe
+const forward = createForwardProxyHandler({ policy }); // http(s) requests in absolute-form
+exit.handle((req) => (req.method === "CONNECT" ? tunnels(req) : forward(req)));
+```
+
+Refusals are ordinary statuses (`403` for the policy, `502`/`504` when the destination fails), and the forward handler never follows a redirect. `bridgeTunnel(socket, tunnel)` is the two-way pipe both handlers use, with backpressure in both directions, for the client side of a tunnel too.
 
 ## Gateway CLI
 

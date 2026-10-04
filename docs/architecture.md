@@ -72,7 +72,7 @@ them:
 | `src/caps.ts` | XEP-0115 ver hashing (`computeCapsVer`, `buildCapsElement`, `capsVerFromDiscoQuery`) |
 | `src/client/` | `HttpxClient`, `HttpxResponse`, `httpxFetch` (WHATWG bridge) |
 | `src/server/` | `HttpxServer`, authorization policies (`allowAll`/`allowList`/`denyAll`) |
-| `src/node/` | Node-only: `createOriginProxyHandler` reverse proxy (subpath export `xmpp-httpx/node`) |
+| `src/node/` | Node-only (subpath export `xmpp-httpx/node`): `createOriginProxyHandler` reverse proxy; `DestinationPolicy`, `createForwardProxyHandler`, `createConnectHandler` and `bridgeTunnel` for forward proxies (exits); the SOCKS5 bytestream adapter |
 
 Subpath exports: `xmpp-httpx`, `./codec`, `./client`, `./server`, `./node`.
 ESM only, built with plain `tsc` into `dist/`.

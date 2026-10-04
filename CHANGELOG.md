@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Forward proxying in `xmpp-httpx/node`.** `DestinationPolicy` decides where
+  an exit may connect. By default that is the public internet on ports 80 and
+  443. Private, shared, loopback, link-local, multicast, reserved and
+  documentation space are refused, and so are cloud-metadata endpoints, IPv6
+  forms that embed one of those IPv4 addresses, and the host's own addresses.
+  The check runs as the socket's `lookup`, so the address checked is the
+  address dialled. `createForwardProxyHandler` serves `http(s)` requests in
+  absolute-form (or origin-form with a Host header) and passes redirects back
+  instead of following them. `createConnectHandler` serves CONNECT on a server
+  started with `tunnels: true`. `bridgeTunnel` pipes a socket and a tunnel
+  with backpressure both ways, and `stripHopByHop` drops RFC 9110 hop-by-hop
+  fields. All of it moved here from n146's exit, unchanged apart from names
+  and a `name` option for the refusal text, as n146's design planned once
+  the API had settled.
+
 ## 0.10.0 — 2026-10-04
 
 - **Proxy mode: the ordinary web through an exit.** `httpxFetch(url, { session,
