@@ -449,9 +449,10 @@ on the other end.
 
 - [~] **CI action versions** (S): `actions/checkout` and `actions/setup-node`
   are on `@v5` (2026-09-24). `upload-pages-artifact@v3` / `deploy-pages@v4`
-  are left as they are until their next majors are verified. Separately,
-  `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19 — worth one run on
-  `ubuntu-26.04` before the label moves, since the e2e job brings up Docker.
+  are left as they are until their next majors are verified. The move of
+  `ubuntu-latest` to Ubuntu 26 (2026-10-19) is covered: a manual run takes a
+  `runner` input, and the whole workflow, the Docker E2E job included, passed
+  on `ubuntu-26.04` on 2026-10-04 (run 37230681901; n146's too).
 - [x] `HttpxResponse.formData()`, which delegates to the platform's parser, so
   multipart works without a multipart parser living here, plus
   `parseAccept`/`negotiateContentType` for content negotiation that gets
