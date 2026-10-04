@@ -20,7 +20,8 @@
     // test/browser/ exercises examples/webext/src, which imports the library by
     // package name; resolve that to the sources so typecheck needs no dist/.
     "paths": {
-      "xmpp-httpx": ["./src/index.ts"]
+      "xmpp-httpx": ["./src/index.ts"],
+      "xmpp-httpx/node": ["./src/node/index.ts"]
     }
   },
   // examples/webext/src/webext-api.d.ts: ambient WebExtension globals for the
