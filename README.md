@@ -252,6 +252,8 @@ cd examples/dillo && npm install && npm run install:dillo
 ```
 
 Verified against a real dpid and Dillo 3.0.5 under Xvfb (`npm run smoke:dillo`).
+For the ordinary web, point Dillo's `http_proxy` at an n146 daemon; HTTPS then
+travels as a CONNECT tunnel through the exit (see the example's README).
 See [docs/dillo-plugin.md](docs/dillo-plugin.md).
 
 ## Roadmap

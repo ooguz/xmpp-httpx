@@ -99,6 +99,25 @@ httpx://web@httpx.localhost/
   routes `dpi:/<name>/` URLs to the plugin registered under that name, and
   dpid registers ours as `httpx` from its directory name.
 
+## The ordinary web, through an exit
+
+The plugin only ever sees `httpx://` addresses, so the web side is Dillo's own
+proxy setting, pointed at an [n146](https://github.com/ooguz/n146) client daemon
+signed in to XMPP:
+
+```sh
+# ~/.dillo/dillorc (or the http_proxy environment variable, which overrides it)
+http_proxy="http://127.0.0.1:8146/"
+no_proxy="localhost 127.0.0.1"
+```
+
+Dillo 3.0.5 sends `https://` to the proxy as `CONNECT host:443`, which the
+daemon turns into a tunnel to its exit, so TLS stays between Dillo and the site
+and the exit sees only the host and port. Plain `http://` goes as an
+absolute-form `GET`, which the exit can read. Both were checked against a
+recording proxy (2026-10-05). `httpx://` is unaffected: Dillo hands it to this
+plugin, not to the proxy.
+
 ## What Dillo cannot do here
 
 - POST. Dillo hands a plugin only the URL (`Capi_dpi_build_cmd` in

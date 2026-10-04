@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Dillo: the ordinary web through an exit, documented.** Dillo's own
+  `http_proxy` pointed at an n146 daemon sends `https://` as a CONNECT tunnel
+  (TLS end to end) and `http://` as an absolute-form GET; verified with Dillo
+  3.0.5 against a recording proxy. No plugin change: the dpi only ever sees
+  `httpx://`.
 - **Electron shell: the ordinary web through an exit, end to end.** With an
   exit set, the shell's Chromium loads `https://` and `http://` through a
   loopback proxy (`examples/electron/src/web-proxy.ts`): HTTPS as a CONNECT
