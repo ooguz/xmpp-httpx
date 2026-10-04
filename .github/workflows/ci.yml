@@ -5,13 +5,19 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner image (try the next one before ubuntu-latest moves to it)"
+        type: choice
+        options: [ubuntu-latest, ubuntu-26.04, ubuntu-24.04]
+        default: ubuntu-latest
   schedule:
     - cron: "17 3 * * *" # nightly E2E against Prosody
 
 jobs:
   check:
     name: Lint & typecheck
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -28,7 +34,7 @@ jobs:
 
   test:
     name: Test (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     strategy:
       matrix:
         node: [20, 22, 24]
@@ -43,7 +49,7 @@ jobs:
 
   browser:
     name: Test (browser)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -56,7 +62,7 @@ jobs:
 
   e2e:
     name: E2E (Prosody)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - uses: actions/checkout@v5
@@ -69,7 +75,7 @@ jobs:
 
   bench:
     name: Benchmarks & memory (informational)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v5
@@ -83,7 +89,7 @@ jobs:
 
   api-docs:
     name: API docs (GitHub Pages)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     # Pages cannot deploy while the repo is private (free plan); the job
     # activates automatically once the repo goes public and Pages is enabled.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !github.event.repository.private
