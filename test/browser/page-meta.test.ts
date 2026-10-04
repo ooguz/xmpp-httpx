@@ -66,6 +66,19 @@ describe("extractPageMeta", () => {
     }
   });
 
+  it("on a proxied page, accepts its http(s) icon, which then travels through the exit", () => {
+    const page = "https://example.org/dir/page.html";
+    expect(extractPageMeta('<link rel="icon" href="fav.png">', page).iconUrl).toBe(
+      "https://example.org/dir/fav.png",
+    );
+    expect(
+      extractPageMeta('<link rel="icon" href="http://cdn.example/f.ico#x">', page).iconUrl,
+    ).toBe("http://cdn.example/f.ico");
+    for (const href of ["javascript:alert(1)", "ftp://example.org/f.ico", "data:image/png;base64,iVBOR"]) {
+      expect(extractPageMeta(`<link rel="icon" href="${href}">`, page).iconUrl, href).toBeUndefined();
+    }
+  });
+
   it("skips a bad icon and falls back to an earlier usable one", () => {
     const meta = extractPageMeta(
       '<link rel="icon" href="/good.png"><link rel="icon" href="javascript:x">',

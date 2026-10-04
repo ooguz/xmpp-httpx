@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Browser extension: favicons in proxy mode, and a plain warning.** On a
+  page that was itself fetched through an exit, an `http(s)` icon is now
+  loaded too, through the same exit over the XMPP session, never directly.
+  An httpx page's `http(s)` icon is still ignored. The Exit-JID setting now
+  says that the exit sees every proxied page, HTTPS included, and what you
+  type into it.
 - **Forward proxying in `xmpp-httpx/node`.** `DestinationPolicy` decides where
   an exit may connect. By default that is the public internet on ports 80 and
   443. Private, shared, loopback, link-local, multicast, reserved and
@@ -28,7 +34,10 @@
   "not an httpx address" page keep working. `resolveUrl(base, ref)` resolves
   links against either kind of base, and `canonicalUrl(url)` gives a page one
   spelling across both schemes (fragment dropped), for use as a history,
-  bookmark or cache key. The bundled browser extension uses all three.
+  bookmark or cache key. The bundled browser extension uses all three. The
+  exit makes each request itself, so for an `https://` URL it sees the whole
+  exchange (TLS ends at the exit): this is for exits the user trusts with
+  that. For end-to-end TLS, tunnel with `HttpxClient.connect()` instead.
 - **XEP-0478 stream limits drive the stanza budgets.** `parseStreamLimits`
   reads the `<limits/>` a server announces in its stream features;
   `watchStreamLimits` installs the listener (before `entity.start()`, since
