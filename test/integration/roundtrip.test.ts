@@ -10,6 +10,7 @@ import {
   type HttpxHandler,
   type HttpxServerOptions,
 } from "../../src/server/server.js";
+import { decodeBase64 } from "../../src/util/base64.js";
 import { bytesFromStream } from "../../src/util/bytes.js";
 import { createSessionPair, MockSession } from "../../src/testing/mock-session.js";
 
@@ -252,6 +253,54 @@ describe("failure mapping", () => {
     const result = await clientSession.iqCaller.request(iq, 1000);
     const resp = decodeResp(result.getChild("resp", NS_HTTPX)!);
     expect(resp.statusCode).toBe(501);
+  });
+
+  it("a <req> that is not well formed is an IQ error modify/bad-request, not an HTTP status", async () => {
+    // It never became an HTTP request, so an HTTP status would be wrong
+    // (implementation report part 1, item 5; revision brief R5).
+    let handled = false;
+    const { clientSession, serverSession } = setup(() => {
+      handled = true;
+      return { status: 200 };
+    });
+    // The error stanza as the server sends it, read off the wire.
+    const errorTypes: string[] = [];
+    serverSession.deliverHook = (stanza, deliver) => {
+      if (stanza.attrs["type"] === "error") errorTypes.push(stanza.getChild("error")?.attrs["type"] ?? "");
+      deliver();
+    };
+    for (const attrs of [
+      { method: "BREW", resource: "/", version: "1.1" }, // no such method
+      { method: "GET", version: "1.1" }, // no resource
+    ]) {
+      const iq = xml("iq", { type: "set", to: "server@example.org" }, xml("req", { xmlns: NS_HTTPX, ...attrs }));
+      const err = await clientSession.iqCaller.request(iq, 1000).then(
+        () => undefined,
+        (e: unknown) => e as { condition?: string },
+      );
+      expect(err?.condition, JSON.stringify(attrs)).toBe("bad-request");
+    }
+    expect(errorTypes).toEqual(["modify", "modify"]);
+    expect(handled).toBe(false);
+  });
+
+  it("chunkedBase64 chunks never exceed the requester's maxChunkSize, counted in decoded bytes", async () => {
+    const body = new Uint8Array(20_000).map((_, i) => i & 0xff);
+    const { client, serverSession } = setup(
+      () => ({ status: 200, body }),
+      { preferredStreams: ["chunkedBase64"] },
+      { maxChunkSize: 1000, accept: { ibb: false, jingle: false, sipub: false } },
+    );
+    const sizes: number[] = [];
+    serverSession.deliverHook = (stanza, deliver) => {
+      const chunk = stanza.getChild("chunk", NS_HTTPX);
+      if (chunk) sizes.push(decodeBase64(chunk.getText()).length);
+      deliver();
+    };
+    const resp = await client.request("server@example.org", { resource: "/" });
+    expect((await bytesFromStream(resp.body!)).length).toBe(20_000);
+    expect(sizes.length).toBeGreaterThan(1);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(1000);
   });
 
   it("oversized inline request bodies are answered with HTTP 413", async () => {
