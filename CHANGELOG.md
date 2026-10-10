@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 — 2026-10-11
 
 - **Dillo: the ordinary web through an exit, documented.** Dillo's own
   `http_proxy` pointed at an n146 daemon sends `https://` as a CONNECT tunnel
