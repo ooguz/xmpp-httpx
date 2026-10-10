@@ -1,8 +1,10 @@
 # Interoperability matrix
 
-xmpp-httpx is currently its own interop anchor; there is no other known
-maintained XEP-0332 implementation. This page tracks what the library has
-been exercised against. Reports (issues/PRs) for other servers and clients
+xmpp-httpx is currently its own interop anchor. A second, maintained
+implementation exists: the XEP author's `Waher.Networking.XMPP.HTTPX`
+(part of the IoT Gateway, on NuGet; 4.4.0 released 2026-10-02). It has not
+been tested against yet; see the table below. This page tracks what the
+library has been exercised against. Reports (issues/PRs) for other servers and clients
 are very welcome; the E2E suite (`docs/testing.md`) is designed to be
 pointed at other backends with minimal changes.
 
@@ -24,8 +26,8 @@ through a component gateway, over `ws://` transport.
 | Implementation | Status |
 |---|---|
 | xmpp-httpx ↔ xmpp-httpx | ✅ continuously (mock pair, headless Chromium, live Prosody) |
-| Clayster (the XEP author's stack, referenced in the XEP's examples) | ❓ no known public endpoint; pointers appreciated |
-| Anything else | none known as of 2026-07 |
+| [Waher.Networking.XMPP.HTTPX](https://github.com/PeterWaher/IoTGateway/tree/master/Networking/Waher.Networking.XMPP.HTTPX) 4.4.0 (.NET Standard 2.1, the XEP author's) | ❓ not yet tested. Its licence permits personal evaluation and needs a commercial licence beyond that, so cross-tests are planned with its author rather than run in this repo's public CI |
+| Anything else | none known as of 2026-10 |
 
 ## Runtimes
 
