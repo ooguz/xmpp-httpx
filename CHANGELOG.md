@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **WebExtension: pages render on current Firefox for Android.** The page
+  view was set through `iframe.srcdoc` and waited for the frame's `load`.
+  GeckoView 159 never navigates a frame inside an extension tab (srcdoc,
+  `blob:`, `data:` and `https:` frames all stay on `about:blank`), so every
+  load hung on a blank page. Pages are now written into the frame's own
+  document (`writeFrame`); the sandbox still has no `allow-scripts`, and a new
+  test pins that scripts and inline handlers in a written page never run.
+  Found while porting Berrak to Focus 159.
+
 ## 0.11.0 — 2026-10-11
 
 - **Dillo: the ordinary web through an exit, documented.** Dillo's own

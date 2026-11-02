@@ -20,8 +20,8 @@ import {
  * Rendering pipeline for fetched HTML:
  *   sanitize (DOMPurify, no scripts/forms; CSS allowed but re-sanitized
  *   separately since DOMPurify doesn't parse CSS) → resolve relative URLs →
- *   fetch httpx subresources into blob: URLs → srcdoc into a sandboxed
- *   iframe WITHOUT allow-scripts (allow-same-origin alone is safe when
+ *   fetch httpx subresources into blob: URLs → written into a sandboxed
+ *   iframe (writeFrame) WITHOUT allow-scripts (allow-same-origin alone is safe when
  *   nothing can execute, and it lets us intercept link clicks from here).
  */
 
@@ -167,10 +167,7 @@ export async function renderHtml(
   doc.head.prepend(style);
 
   const { iframe } = target;
-  await new Promise<void>((resolve) => {
-    iframe.addEventListener("load", () => resolve(), { once: true });
-    iframe.srcdoc = doc.documentElement.outerHTML;
-  });
+  await writeFrame(iframe, doc.documentElement.outerHTML);
 
   // allow-same-origin (and no scripts) → we can reach into the document.
   const frameDoc = iframe.contentDocument;
@@ -217,6 +214,44 @@ export async function renderHtml(
   });
 
   return () => blobs.revoke();
+}
+
+/**
+ * Makes `html` the frame's document and resolves once it has finished loading.
+ *
+ * The document is written into the frame (open/write/close on its about:blank
+ * document) instead of being set as `srcdoc`. srcdoc navigates the frame, and
+ * some engines will not navigate a frame inside an extension page: on Firefox
+ * for Android (GeckoView 159) srcdoc, blob:, data: and https: frames in a
+ * moz-extension tab all stay on about:blank and never fire "load", so every
+ * page load hung. Writing works there and in Chromium alike, and keeps the
+ * guarantee that matters: the frame's sandbox has no allow-scripts, so
+ * scripts and inline handlers in `html` never run.
+ */
+export async function writeFrame(iframe: HTMLIFrameElement, html: string): Promise<void> {
+  const frameDoc = iframe.contentDocument;
+  if (!frameDoc) throw new Error("writeFrame: the iframe is not in a document");
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+  iframe.dataset["rendered"] = "";
+  // Images and stylesheets may still be loading; "complete" is when the old
+  // srcdoc "load" event used to fire. Listeners go on after open(), which
+  // removes any registered on the document.
+  await new Promise<void>((resolve) => {
+    const settle = (): void => {
+      if (frameDoc.readyState !== "complete") return;
+      frameDoc.removeEventListener("readystatechange", settle);
+      resolve();
+    };
+    frameDoc.addEventListener("readystatechange", settle);
+    settle();
+  });
+}
+
+/** Whether anything has been written into the frame yet (see writeFrame). */
+export function hasContent(iframe: HTMLIFrameElement): boolean {
+  return "rendered" in iframe.dataset;
 }
 
 export interface ErrorAction {
@@ -276,10 +311,7 @@ export async function renderError(
     doc.body.append(actions);
   }
 
-  await new Promise<void>((resolve) => {
-    iframe.addEventListener("load", () => resolve(), { once: true });
-    iframe.srcdoc = doc.documentElement.outerHTML;
-  });
+  await writeFrame(iframe, doc.documentElement.outerHTML);
 
   iframe.contentDocument?.addEventListener("click", (event) => {
     const anchor = (event.target as Element | null)?.closest?.("a[data-action]");
@@ -315,9 +347,6 @@ export async function renderPlain(
   }
 
   const { iframe } = target;
-  await new Promise<void>((resolve) => {
-    iframe.addEventListener("load", () => resolve(), { once: true });
-    iframe.srcdoc = doc.documentElement.outerHTML;
-  });
+  await writeFrame(iframe, doc.documentElement.outerHTML);
   return revoke;
 }

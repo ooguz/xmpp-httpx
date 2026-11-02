@@ -4,9 +4,11 @@ import type {
   FormSubmission,
 } from "../../examples/webext/src/forms.js";
 import {
+  hasContent,
   renderError,
   renderHtml,
   renderPlain,
+  writeFrame,
 } from "../../examples/webext/src/render.js";
 
 const BASE = "httpx://site@example.org/dir/page.html";
@@ -288,8 +290,50 @@ describe("renderError", () => {
   });
 });
 
+describe("writeFrame", () => {
+  it("writes the document in place, without navigating the frame", async () => {
+    // srcdoc would navigate; GeckoView 159 never navigates frames inside an
+    // extension tab, so every load hung there. The frame must keep its
+    // initial about:blank document and simply get new contents.
+    const iframe = document.createElement("iframe");
+    iframe.className = "render-test";
+    iframe.setAttribute("sandbox", "allow-same-origin");
+    document.body.append(iframe);
+    const before = iframe.contentDocument;
+    expect(hasContent(iframe)).toBe(false);
+
+    await writeFrame(iframe, "<html><head><style>p { color: rgb(255, 0, 0) }</style></head><body><p>hi</p></body></html>");
+
+    expect(iframe.contentDocument).toBe(before);
+    expect(iframe.srcdoc).toBe("");
+    expect(iframe.contentDocument!.readyState).toBe("complete");
+    const p = iframe.contentDocument!.querySelector("p")!;
+    expect(p.textContent).toBe("hi");
+    expect(iframe.contentWindow!.getComputedStyle(p).color).toBe("rgb(255, 0, 0)");
+    expect(hasContent(iframe)).toBe(true);
+  });
+
+  it("keeps the sandbox: scripts and inline handlers in the document never run", async () => {
+    const iframe = document.createElement("iframe");
+    iframe.className = "render-test";
+    iframe.setAttribute("sandbox", "allow-same-origin");
+    document.body.append(iframe);
+    const w = window as unknown as { __ranInFrame?: string };
+    delete w.__ranInFrame;
+
+    await writeFrame(
+      iframe,
+      `<body><script>parent.__ranInFrame = "script"</script>` +
+        `<img src="data:," onerror="parent.__ranInFrame = 'handler'" onload="parent.__ranInFrame = 'handler'"></body>`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(w.__ranInFrame).toBeUndefined();
+  });
+});
+
 describe("hidden iframes", () => {
-  it("still load their srcdoc — background tabs depend on it", async () => {
+  it("still take their document — background tabs depend on it", async () => {
     // The tab strip keeps one iframe per tab and hides all but the active one.
     // If a hidden iframe did not load, a load started in a background tab (or a
     // tab switched away from mid-load) would hang forever.

@@ -28,7 +28,7 @@ import {
   type LoadProgress,
   type ProgressCallback,
 } from "./progress.js";
-import { renderError, renderHtml, renderPlain } from "./render.js";
+import { hasContent, renderError, renderHtml, renderPlain } from "./render.js";
 import { loadSettings, saveSettings, type ConnectionSettings } from "./settings.js";
 import { buildTabStrip } from "./tab-strip.js";
 import { TabSet } from "./tabs.js";
@@ -101,7 +101,8 @@ const resources = new Map<number, TabResources>();
 /**
  * One sandboxed iframe per tab, created on demand and kept alive while the tab
  * exists — switching tabs then costs nothing, no refetch. Hidden iframes still
- * load their `srcdoc`, which is what makes a background load work.
+ * take their document (see writeFrame), which is what makes a background load
+ * work.
  */
 function resourcesFor(id: number): TabResources {
   const existing = resources.get(id);
@@ -265,7 +266,7 @@ function closeTab(id: number): void {
   const active = tabs.active;
   const activeRes = resourcesFor(active.id);
   syncChrome();
-  if (active.url === "" && activeRes.iframe.srcdoc === "") {
+  if (active.url === "" && !hasContent(activeRes.iframe)) {
     void renderNewTabPage(activeRes.iframe);
   }
 }
