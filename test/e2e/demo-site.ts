@@ -6,8 +6,9 @@ import { decodeBase64 } from "../../src/util/base64.js";
  * E2E suite and by the WebExtension demo. Between them the pages exercise the
  * browser's whole surface: relative links, an image subresource, a CSS
  * background fetched over XMPP, a GET form, a urlencoded POST form, and a
- * download. External stylesheets are deliberately absent — the browser strips
- * `<link>`, so page CSS has to arrive in a `<style>` block.
+ * download. Page CSS is a `<style>` block; a linked stylesheet would be
+ * fetched and inlined by the browser (render.ts, inlineStylesheets), which
+ * the browser-mode suite covers.
  */
 
 // 1x1 red PNG.

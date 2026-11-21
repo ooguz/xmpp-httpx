@@ -37,7 +37,12 @@ interface Harness {
 /** Renders `html` into a real same-origin iframe and returns what happened. */
 async function render(
   html: string,
-  options: { available?: (url: string) => boolean } = {},
+  options: {
+    available?: (url: string) => boolean;
+    /** The body served for a URL; a PNG by default. */
+    respond?: (url: string) => Blob | undefined;
+    proxied?: boolean;
+  } = {},
 ): Promise<Harness> {
   const iframe = document.createElement("iframe");
   iframe.className = "render-test";
@@ -55,8 +60,9 @@ async function render(
     fetchResource: async (url) => {
       fetched.push(url);
       if (!available(url)) throw new Error("404");
-      return PNG;
+      return options.respond?.(url) ?? PNG;
     },
+    proxied: options.proxied ?? false,
     onNavigate: (url) => navigations.push(url),
     onSubmit: (submission, reason) => submissions.push({ submission, reason }),
   });
@@ -459,5 +465,111 @@ describe("renderHtml — forms", () => {
     );
     doc.querySelector("button")!.click();
     expect(navigations).toEqual([]);
+  });
+});
+
+const css = (text: string, type = "text/css"): Blob => new Blob([text], { type });
+
+describe("renderHtml — linked stylesheets", () => {
+  const styles = (doc: Document): string =>
+    [...doc.querySelectorAll("style")].map((s) => s.textContent).join("\n");
+
+  it("inlines an httpx stylesheet in place, sanitized", async () => {
+    const { doc, fetched } = await render(
+      `<head><style>h1 { color: rgb(9, 9, 9) }</style>
+       <link rel="stylesheet" href="site.css" media="screen">
+       <style>h1 { margin: 3px }</style></head><h1>t</h1>`,
+      {
+        respond: (url) =>
+          url.endsWith(".css")
+            ? css(`@import url(more.css); h1 { color: rgb(1, 2, 3) }
+                   p { background: url(javascript:alert(1)) }`)
+            : undefined,
+      },
+    );
+    expect(fetched).toContain("httpx://site@example.org/dir/site.css");
+    expect(doc.querySelector("link")).toBeNull();
+    const sheets = [...doc.querySelectorAll("style")].map((s) => s.textContent!);
+    // Base style, then the page's three in source order.
+    expect(sheets).toHaveLength(4);
+    expect(sheets[1]).toContain("rgb(9, 9, 9)");
+    expect(sheets[2]).toContain("rgb(1, 2, 3)");
+    expect(sheets[3]).toContain("margin: 3px");
+    expect(doc.querySelectorAll("style")[2]!.getAttribute("media")).toBe("screen");
+    expect(sheets[2]).not.toMatch(/@import|javascript/);
+    expect(fetched).not.toContain("httpx://site@example.org/dir/more.css");
+    expect(getComputedStyle(doc.querySelector("h1")!).color).toBe("rgb(1, 2, 3)");
+  });
+
+  it("resolves the sheet's url()s against the sheet, and fetches them", async () => {
+    const { doc, fetched } = await render(
+      `<link rel="stylesheet" href="/theme/site.css"><p>x</p>`,
+      {
+        respond: (url) =>
+          url.endsWith(".css") ? css(`body { background-image: url(img/bg.png) }`) : undefined,
+      },
+    );
+    expect(fetched).toContain("httpx://site@example.org/theme/img/bg.png");
+    expect(styles(doc)).toMatch(/url\("blob:/);
+    expect(styles(doc)).not.toContain("httpx://");
+  });
+
+  it("drops a sheet that is not text/css, fails, or is an alternate", async () => {
+    const { doc, fetched } = await render(
+      `<link rel="stylesheet" href="png.css">
+       <link rel="stylesheet" href="gone.css">
+       <link rel="alternate stylesheet" href="alt.css">
+       <link rel="icon" href="favicon.png"><p>x</p>`,
+      {
+        available: (url) => !url.endsWith("gone.css"),
+        respond: (url) =>
+          url.endsWith("png.css") ? undefined : css("p { color: rgb(7, 7, 7) }"),
+      },
+    );
+    expect(fetched).toEqual(
+      expect.arrayContaining([
+        "httpx://site@example.org/dir/png.css",
+        "httpx://site@example.org/dir/gone.css",
+      ]),
+    );
+    expect(fetched).not.toContain("httpx://site@example.org/dir/alt.css");
+    expect(fetched).not.toContain("httpx://site@example.org/dir/favicon.png");
+    expect(doc.querySelector("link")).toBeNull();
+    expect(doc.querySelectorAll("style")).toHaveLength(1); // the base style
+  });
+
+  it("leaves no https stylesheet to the frame on an httpx page", async () => {
+    const { doc, fetched } = await render(
+      `<link rel="stylesheet" href="https://cdn.example/site.css"><p>x</p>`,
+    );
+    expect(fetched).toEqual([]);
+    expect(doc.querySelector("link")).toBeNull();
+  });
+
+  it("fetches an https stylesheet through the extension on a proxied page", async () => {
+    const { doc, fetched } = await render(
+      `<link rel="stylesheet" href="https://cdn.example/site.css"><p>x</p>`,
+      { proxied: true, respond: () => css("p { color: rgb(5, 6, 7) }") },
+    );
+    expect(fetched).toEqual(["https://cdn.example/site.css"]);
+    expect(styles(doc)).toContain("rgb(5, 6, 7)");
+  });
+
+  it("fetches a sheet linked twice only once", async () => {
+    const { doc, fetched } = await render(
+      `<link rel="stylesheet" href="a.css"><link rel="stylesheet" href="a.css">`,
+      { respond: () => css("p { color: rgb(1, 1, 1) }") },
+    );
+    expect(fetched).toEqual(["httpx://site@example.org/dir/a.css"]);
+    expect(doc.querySelectorAll("style")).toHaveLength(3);
+  });
+
+  it("keeps a smuggled </style> escaped in an inlined sheet", async () => {
+    const { doc } = await render(`<link rel="stylesheet" href="x.css"><p>x</p>`, {
+      respond: () =>
+        css(`p::after { content: "\\3c /style\\3e \\3c img src=https://evil.example/x\\3e " }`),
+    });
+    expect(styles(doc)).not.toContain("</style");
+    expect(doc.querySelector('img[src*="evil.example"]')).toBeNull();
   });
 });

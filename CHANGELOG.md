@@ -10,6 +10,15 @@
   document (`writeFrame`); the sandbox still has no `allow-scripts`, and a new
   test pins that scripts and inline handlers in a written page never run.
   Found while porting Berrak to Focus 159.
+- **WebExtension: linked stylesheets apply.** `<link rel="stylesheet">` was
+  stripped, so a page styled from an external sheet (most of the web, seen
+  on xmpp.org through a Berrak exit) rendered unstyled. The extension now
+  fetches each such sheet the way it fetches the page's images (httpx://
+  always, http(s):// on a proxied page), runs it through the same CSS
+  sanitizer as an inline `<style>` with its `url()`s resolved against the
+  sheet, and puts it in the link's place. The frame still loads no
+  stylesheet itself; `@import`, alternates and sheets not served as
+  `text/css` are dropped.
 
 ## 0.11.0 — 2026-10-11
 

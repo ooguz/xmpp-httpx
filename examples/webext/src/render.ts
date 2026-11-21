@@ -13,13 +13,15 @@ import {
 import {
   allowSafeSchemes,
   sanitizeDocumentStyles,
+  sanitizeStylesheet,
   type CssUrlResolver,
 } from "./sanitize-css.js";
 
 /**
  * Rendering pipeline for fetched HTML:
  *   sanitize (DOMPurify, no scripts/forms; CSS allowed but re-sanitized
- *   separately since DOMPurify doesn't parse CSS) → resolve relative URLs →
+ *   separately since DOMPurify doesn't parse CSS) → inline linked
+ *   stylesheets (inlineStylesheets) → resolve relative URLs →
  *   fetch httpx subresources into blob: URLs → written into a sandboxed
  *   iframe (writeFrame) WITHOUT allow-scripts (allow-same-origin alone is safe when
  *   nothing can execute, and it lets us intercept link clicks from here).
@@ -30,9 +32,11 @@ import {
 const ALLOWED_URI = /^(?:(?:httpx?|https|blob|data|mailto|xmpp):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i;
 
 const PURIFY_CONFIG = {
+  // <link> passes only so that inlineStylesheets can turn a stylesheet link
+  // into a sanitized <style>; it removes every <link>, whatever its rel.
+  ADD_TAGS: ["link"],
   FORBID_TAGS: [
     "script",
-    "link",
     "iframe",
     "frame",
     "object",
@@ -43,6 +47,9 @@ const PURIFY_CONFIG = {
   ALLOWED_URI_REGEXP: ALLOWED_URI,
   WHOLE_DOCUMENT: true,
 };
+
+/** At most this many linked stylesheets are fetched per page. */
+const MAX_STYLESHEETS = 32;
 
 const BASE_STYLE = `
   body { font-family: system-ui, sans-serif; line-height: 1.5; margin: 1.5rem auto;
@@ -115,6 +122,8 @@ export async function renderHtml(
   const proxied = target.proxied ?? false;
   const viaExtension = (url: string): boolean =>
     url.startsWith("httpx://") || (proxied && /^https?:\/\//i.test(url));
+
+  await inlineStylesheets(doc, baseUrl, viaExtension, target.fetchResource);
 
   // CSS pass 1: sanitize and resolve every url() to absolute, collecting the
   // httpx references that need fetching before the document can be shown.
@@ -214,6 +223,70 @@ export async function renderHtml(
   });
 
   return () => blobs.revoke();
+}
+
+/**
+ * Replaces each `<link rel="stylesheet">` with a `<style>` holding the
+ * sheet's sanitized text, in place so the cascade order is kept, and
+ * removes every other `<link>`. The frame never loads a stylesheet itself:
+ * only a sheet the extension fetches (see `viaExtension`) is kept, and it
+ * goes through the same CSS sanitizer as the page's own `<style>`, its
+ * `url()`s resolved against the sheet's URL. A sheet that fails to load,
+ * is not served as text/css, or is an alternate is dropped. `@import`
+ * inside it is dropped as in any `<style>`.
+ */
+async function inlineStylesheets(
+  doc: Document,
+  baseUrl: string,
+  viaExtension: (url: string) => boolean,
+  fetchResource: (url: string) => Promise<Blob>,
+): Promise<void> {
+  const sheets: { link: Element; url: string }[] = [];
+  for (const link of doc.querySelectorAll("link")) {
+    const rel = (link.getAttribute("rel") ?? "").toLowerCase().split(/\s+/);
+    const href = link.getAttribute("href");
+    let url: string | null = null;
+    if (href && rel.includes("stylesheet") && !rel.includes("alternate")) {
+      try {
+        url = resolveUrl(baseUrl, href);
+      } catch {
+        url = null;
+      }
+    }
+    if (url && viaExtension(url) && sheets.length < MAX_STYLESHEETS) {
+      sheets.push({ link, url });
+    } else {
+      link.remove();
+    }
+  }
+  const texts = new Map<string, Promise<string>>();
+  const load = (url: string): Promise<string> => {
+    let text = texts.get(url);
+    if (!text) {
+      text = fetchResource(url)
+        .then((blob) =>
+          blob.type === "" || /^text\/css\b/i.test(blob.type) ? blob.text() : "",
+        )
+        .catch(() => "");
+      texts.set(url, text);
+    }
+    return text;
+  };
+  await Promise.all(
+    sheets.map(async ({ link, url }) => {
+      // Absolute url()s now; the document's two CSS passes fetch them.
+      const css = sanitizeStylesheet(await load(url), url, (ref) => ref);
+      if (css === "") {
+        link.remove();
+        return;
+      }
+      const style = doc.createElement("style");
+      const media = link.getAttribute("media");
+      if (media) style.setAttribute("media", media);
+      style.textContent = css;
+      link.replaceWith(style);
+    }),
+  );
 }
 
 /**
