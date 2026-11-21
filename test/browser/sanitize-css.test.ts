@@ -51,6 +51,35 @@ describe("sanitizeStylesheet", () => {
     expect(css).toContain("rotate(1turn)");
   });
 
+  it("rewrites @font-face src without editing the rule (Gecko refuses that)", () => {
+    // Firefox for Android (Gecko 159) throws "Can't set descriptor on
+    // CSSFontFaceRule declarations"; desktop engines here allow it, so
+    // emulate the refusal.
+    const setProperty = CSSStyleDeclaration.prototype.setProperty;
+    CSSStyleDeclaration.prototype.setProperty = function (this: CSSStyleDeclaration, ...args) {
+      if (this.parentRule instanceof CSSFontFaceRule) {
+        throw new DOMException("Can't set descriptor on CSSFontFaceRule declarations");
+      }
+      return setProperty.apply(this, args);
+    };
+    try {
+      const css = sanitizeStylesheet(
+        `@font-face { font-family: f; src: url(f.woff2) format("woff2"); font-display: swap }
+         @font-face { font-family: g; src: url(http://insecure.example/g.woff2) }
+         p { background: url(bg.png) }`,
+        BASE,
+      );
+      expect(css).toContain('url("httpx://site@example.org/dir/f.woff2")');
+      expect(css).toContain("swap");
+      expect(css).not.toContain("insecure.example");
+      expect(css).toContain('url("httpx://site@example.org/dir/bg.png")');
+      // Its own output is stable (the render pipeline runs it twice).
+      expect(sanitizeStylesheet(css, BASE)).toBe(css);
+    } finally {
+      CSSStyleDeclaration.prototype.setProperty = setProperty;
+    }
+  });
+
   it("resolves relative url() against the httpx base", () => {
     const css = sanitizeStylesheet("div { background-image: url(pic.png) }", BASE);
     expect(css).toContain('url("httpx://site@example.org/dir/pic.png")');

@@ -19,6 +19,14 @@
   sheet, and puts it in the link's place. The frame still loads no
   stylesheet itself; `@import`, alternates and sheets not served as
   `text/css` are dropped.
+- **WebExtension: `@font-face` with a `url()` no longer fails the page on
+  Firefox for Android.** The CSS sanitizer rewrote `src: url(…)` in place,
+  and Gecko refuses `setProperty` on a font-face rule's declarations, so a
+  page whose CSS declared a web font failed to load with "Can't set
+  descriptor on CSSFontFaceRule declarations". Font-face rules are now
+  rebuilt from their sanitized declarations instead, and a CSSOM error in
+  one stylesheet drops that sheet rather than the page. Found on Berrak
+  (GeckoView 159) loading xmpp.org through an exit.
 
 ## 0.11.0 — 2026-10-11
 

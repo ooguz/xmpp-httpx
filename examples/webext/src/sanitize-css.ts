@@ -126,6 +126,30 @@ function sanitizeDeclaration(
 }
 
 /**
+ * A declaration block's sanitized text, built without touching the CSSOM.
+ * For `@font-face`: Gecko refuses `setProperty` on a CSSFontFaceRule's
+ * declarations ("Can't set descriptor"), so the in-place rewrite that style
+ * rules get would throw there for every `src: url(…)`. The output is parsed
+ * again by the next sanitizer pass, like everything this module emits.
+ */
+function sanitizedDeclarationText(
+  style: CSSStyleDeclaration,
+  baseUrl: string,
+  resolve: CssUrlResolver,
+): string {
+  const kept: string[] = [];
+  for (const prop of Array.from(style)) {
+    const value = style.getPropertyValue(prop);
+    if (DANGEROUS_PROPS.has(prop.toLowerCase()) || DANGEROUS_VALUE.test(value)) continue;
+    const rewritten = value.includes("url(") ? rewriteUrls(value, baseUrl, resolve) : value;
+    if (rewritten === null) continue;
+    const important = style.getPropertyPriority(prop) === "important" ? " !important" : "";
+    kept.push(`${prop}: ${rewritten}${important};`);
+  }
+  return kept.join(" ");
+}
+
+/**
  * Serializes the rules we allow, sanitizing their declarations in place, and
  * silently omits every other rule. Allow-listing on the way out rather than
  * calling `deleteRule` avoids CSSOM's refusal to remove an `@namespace` rule
@@ -140,10 +164,18 @@ function serializeAllowedRules(
   for (const rule of Array.from(container.cssRules)) {
     switch (rule.type) {
       case CSSRule.STYLE_RULE:
-      case CSSRule.FONT_FACE_RULE:
         sanitizeDeclaration((rule as CSSStyleRule).style, baseUrl, resolve);
         kept.push(rule.cssText);
         break;
+      case CSSRule.FONT_FACE_RULE: {
+        const body = sanitizedDeclarationText(
+          (rule as CSSFontFaceRule).style,
+          baseUrl,
+          resolve,
+        );
+        if (body !== "") kept.push(`@font-face { ${body} }`);
+        break;
+      }
       case CSSRule.KEYFRAMES_RULE:
         for (const kf of Array.from((rule as CSSKeyframesRule).cssRules)) {
           sanitizeDeclaration((kf as CSSKeyframeRule).style, baseUrl, resolve);
@@ -186,8 +218,15 @@ export function sanitizeStylesheet(
   } catch {
     return "";
   }
+  let serialized: string;
+  try {
+    serialized = serializeAllowedRules(sheet, baseUrl, resolve);
+  } catch {
+    // An engine refusing a CSSOM edit must cost the sheet, not the page.
+    return "";
+  }
   return (
-    serializeAllowedRules(sheet, baseUrl, resolve)
+    serialized
       // A CSS string may legitimately contain "</style", which would close the
       // raw-text element early when the document is re-serialized into srcdoc
       // and inject markup. `\3c` is the CSS escape for "<".
