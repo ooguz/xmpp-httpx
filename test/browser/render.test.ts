@@ -97,11 +97,26 @@ describe("renderHtml — sanitization", () => {
     expect(css).not.toContain("insecure.example");
   });
 
-  it("injects the base style first so page CSS wins", async () => {
-    const { doc } = await render("<style>body { margin: 4px }</style><p>x</p>");
+  it("gives an unstyled page the reading style", async () => {
+    const { doc } = await render('<p style="color: red">x</p>');
     const styles = [...doc.querySelectorAll("style")];
-    expect(styles[0]!.textContent).toContain("font-family");
-    expect(styles.at(-1)!.textContent).toContain("margin: 4px");
+    expect(styles).toHaveLength(1);
+    expect(styles[0]!.textContent).toContain("max-width: 46rem");
+    expect(doc.defaultView!.getComputedStyle(doc.body).maxWidth).not.toBe("none");
+  });
+
+  it("leaves a page with its own stylesheet to that stylesheet", async () => {
+    const { doc } = await render("<style>header { color: rgb(1, 2, 3) }</style><p>x</p>");
+    const css = [...doc.querySelectorAll("style")].map((s) => s.textContent).join("");
+    expect(css).not.toContain("46rem");
+    expect(doc.defaultView!.getComputedStyle(doc.body).maxWidth).toBe("none");
+  });
+
+  it("counts a stylesheet the sanitizer emptied as no stylesheet", async () => {
+    const { doc } = await render(
+      "<style>@import url(httpx://site@example.org/t.css);</style><p>x</p>",
+    );
+    expect(doc.querySelector("style")!.textContent).toContain("46rem");
   });
 
   it("re-escapes </style> smuggled through a CSS escape", async () => {
@@ -490,13 +505,13 @@ describe("renderHtml — linked stylesheets", () => {
     expect(fetched).toContain("httpx://site@example.org/dir/site.css");
     expect(doc.querySelector("link")).toBeNull();
     const sheets = [...doc.querySelectorAll("style")].map((s) => s.textContent!);
-    // Base style, then the page's three in source order.
-    expect(sheets).toHaveLength(4);
-    expect(sheets[1]).toContain("rgb(9, 9, 9)");
-    expect(sheets[2]).toContain("rgb(1, 2, 3)");
-    expect(sheets[3]).toContain("margin: 3px");
-    expect(doc.querySelectorAll("style")[2]!.getAttribute("media")).toBe("screen");
-    expect(sheets[2]).not.toMatch(/@import|javascript/);
+    // The page's three in source order; a styled page gets no base style.
+    expect(sheets).toHaveLength(3);
+    expect(sheets[0]).toContain("rgb(9, 9, 9)");
+    expect(sheets[1]).toContain("rgb(1, 2, 3)");
+    expect(sheets[2]).toContain("margin: 3px");
+    expect(doc.querySelectorAll("style")[1]!.getAttribute("media")).toBe("screen");
+    expect(sheets[1]).not.toMatch(/@import|javascript/);
     expect(fetched).not.toContain("httpx://site@example.org/dir/more.css");
     expect(getComputedStyle(doc.querySelector("h1")!).color).toBe("rgb(1, 2, 3)");
   });
@@ -561,7 +576,7 @@ describe("renderHtml — linked stylesheets", () => {
       { respond: () => css("p { color: rgb(1, 1, 1) }") },
     );
     expect(fetched).toEqual(["httpx://site@example.org/dir/a.css"]);
-    expect(doc.querySelectorAll("style")).toHaveLength(3);
+    expect(doc.querySelectorAll("style")).toHaveLength(2);
   });
 
   it("keeps a smuggled </style> escaped in an inlined sheet", async () => {

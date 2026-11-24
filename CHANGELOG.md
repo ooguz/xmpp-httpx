@@ -19,6 +19,12 @@
   sheet, and puts it in the link's place. The frame still loads no
   stylesheet itself; `@import`, alternates and sheets not served as
   `text/css` are dropped.
+- **WebExtension: styled pages keep their own layout.** The extension's
+  reading style (system font, a centred 46rem column) was put under every
+  page, so a real site with its own CSS was boxed into that column unless its
+  CSS happened to reset `body`'s `max-width`. It now applies only to pages
+  that bring no stylesheet (most httpx services); a page with a `<style>` or a
+  linked sheet that survives sanitization is laid out by that CSS alone.
 - **WebExtension: `@font-face` with a `url()` no longer fails the page on
   Firefox for Android.** The CSS sanitizer rewrote `src: url(…)` in place,
   and Gecko refuses `setProperty` on a font-face rule's declarations, so a

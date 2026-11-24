@@ -170,10 +170,15 @@ export async function renderHtml(
 
   prepareForms(doc, baseUrl);
 
-  // Prepended, not appended: page CSS is now allowed and should win.
-  const style = doc.createElement("style");
-  style.textContent = BASE_STYLE;
-  doc.head.prepend(style);
+  // The reading style is for pages that bring no stylesheet of their own (most
+  // httpx services). A page that does is laid out as its author meant: the
+  // base style's centred 46rem column would box a real site's full-width
+  // layout. Prepended, so page rules that mention body still win.
+  if (!hasAuthorStylesheet(doc)) {
+    const style = doc.createElement("style");
+    style.textContent = BASE_STYLE;
+    doc.head.prepend(style);
+  }
 
   const { iframe } = target;
   await writeFrame(iframe, doc.documentElement.outerHTML);
@@ -235,6 +240,14 @@ export async function renderHtml(
  * is not served as text/css, or is an alternate is dropped. `@import`
  * inside it is dropped as in any `<style>`.
  */
+/**
+ * Whether a stylesheet survived sanitization: a <style> of the page's own or
+ * one inlined from a linked sheet. Style attributes alone do not count.
+ */
+function hasAuthorStylesheet(doc: Document): boolean {
+  return [...doc.querySelectorAll("style")].some((style) => (style.textContent ?? "").trim() !== "");
+}
+
 async function inlineStylesheets(
   doc: Document,
   baseUrl: string,
